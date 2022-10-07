@@ -18,6 +18,9 @@ import robomimic.utils.obs_utils as ObsUtils
 
 from robomimic.algo import register_algo_factory_func, PolicyAlgo
 
+import robomimic.utils.file_utils as FileUtils
+import os
+import pdb
 
 @register_algo_factory_func("bc")
 def algo_config_to_class(algo_config):
@@ -37,7 +40,9 @@ def algo_config_to_class(algo_config):
     gaussian_enabled = ("gaussian" in algo_config and algo_config.gaussian.enabled)
     gmm_enabled = ("gmm" in algo_config and algo_config.gmm.enabled)
     vae_enabled = ("vae" in algo_config and algo_config.vae.enabled)
-
+    dagger_enabled = ("dagger" in algo_config and algo_config.dagger.enabled)
+    if dagger_enabled:
+        return BC_DAgger, {}
     if algo_config.rnn.enabled:
         if gmm_enabled:
             return BC_RNN_GMM, {}
@@ -643,3 +648,9 @@ class BC_RNN_GMM(BC_RNN):
         if "policy_grad_norms" in info:
             log["Policy_Grad_Norms"] = info["policy_grad_norms"]
         return log
+
+
+class BC_DAgger(BC):
+
+    def _create_networks(self):
+        return super()._create_networks()

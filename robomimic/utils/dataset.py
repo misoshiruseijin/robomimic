@@ -13,7 +13,7 @@ import torch.utils.data
 import robomimic.utils.tensor_utils as TensorUtils
 import robomimic.utils.obs_utils as ObsUtils
 import robomimic.utils.log_utils as LogUtils
-
+import pdb
 
 class SequenceDataset(torch.utils.data.Dataset):
     def __init__(
@@ -81,7 +81,6 @@ class SequenceDataset(torch.utils.data.Dataset):
             load_next_obs (bool): whether to load next_obs from the dataset
         """
         super(SequenceDataset, self).__init__()
-
         self.hdf5_path = os.path.expanduser(hdf5_path)
         self.hdf5_use_swmr = hdf5_use_swmr
         self.hdf5_normalize_obs = hdf5_normalize_obs

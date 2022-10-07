@@ -81,3 +81,11 @@ class BCConfig(BaseConfig):
         self.algo.rnn.open_loop = False     # if True, action predictions are only based on a single observation (not sequence)
         self.algo.rnn.kwargs.bidirectional = False            # rnn kwargs
         self.algo.rnn.kwargs.do_not_lock_keys()
+
+        # DAgger settings
+        self.algo.dagger.enabled = False            # whether to use DAgger
+        self.algo.dagger.expert_model = None        # expert model path
+        self.algo.dagger.original_data = None       # path to original dataset used to train the expert
+        self.algo.dagger.new_data = None                        # path to store aggregated data that is updated with every rollout
+        self.algo.dagger.rollout_every_epochs = 50  # how often to do rollout and add data
+        self.algo.dagger.beta_decay = "indicator"   # beta decay mode

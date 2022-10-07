@@ -24,6 +24,9 @@ from robomimic.utils.dataset import SequenceDataset
 from robomimic.envs.env_base import EnvBase
 from robomimic.algo import RolloutPolicy
 
+import robomimic.utils.obs_utils as ObsUtils
+
+import pdb
 
 def get_exp_dir(config, auto_remove_exp_dir=False):
     """
@@ -253,6 +256,143 @@ def run_rollout(
     return results
 
 
+def run_rollout_return_traj(
+        policy, 
+        env, 
+        horizon,
+        use_goals=False,
+        render=False,
+        video_writer=None,
+        video_skip=5,
+        terminate_on_success=False,
+        return_obs=True,
+    ):
+    """
+    Runs a rollout in an environment with the current network parameters and
+    returns rollout trajectories. (Reference: run_trained_agent.py)
+
+    Args:
+        policy (RolloutPolicy instance): policy to use for rollouts.
+
+        env (EnvBase instance): environment to use for rollouts.
+
+        horizon (int): maximum number of steps to roll the agent out for
+
+        use_goals (bool): if True, agent is goal-conditioned, so provide goal observations from env
+
+        render (bool): if True, render the rollout to the screen
+
+        video_writer (imageio Writer instance): if not None, use video writer object to append frames at 
+            rate given by @video_skip
+
+        video_skip (int): how often to write video frame
+
+        terminate_on_success (bool): if True, terminate episode early as soon as a success is encountered
+
+        return_obs (bool): if True, return observation as part of trajectory rather than only raw states
+
+    Returns:
+        results (dict): dictionary containing return, success rate, etc.
+        traj (dict): dictionary of rollout trajectories
+    """
+    assert isinstance(policy, RolloutPolicy)
+    assert isinstance(env, EnvBase)
+
+    policy.start_episode()
+    obs = env.reset()
+    state_dict = env.get_state()
+    
+    goal_dict = None
+    if use_goals:
+        # retrieve goal from the environment
+        goal_dict = env.get_goal()
+
+    results = {}
+    video_count = 0  # video frame counter
+    total_reward = 0.
+
+    traj = dict(actions=[], rewards=[], dones=[], states=[], initial_state_dict=state_dict)
+    if return_obs:
+        traj.update(dict(obs={}, next_obs={}))
+
+    success = { k: False for k in env.is_success() } # success metrics
+
+    try:
+        for step_i in range(horizon):
+
+            # get action from policy
+            ac = policy(ob=obs, goal=goal_dict)
+
+            # play action
+            next_obs, r, done, _ = env.step(ac)
+
+            # render to screen
+            if render:
+                env.render(mode="human")
+
+            # compute reward
+            total_reward += r
+
+            cur_success_metrics = env.is_success()
+            for k in success:
+                success[k] = success[k] or cur_success_metrics[k]
+
+            # visualization
+            if video_writer is not None:
+                if video_count % video_skip == 0:
+                    video_img = env.render(mode="rgb_array", height=512, width=512)
+                    video_writer.append_data(video_img)
+                video_count += 1
+
+            # collect transition
+            traj["actions"].append(ac)
+            traj["rewards"].append(r)
+            traj["dones"].append(done)
+            traj["states"].append(state_dict["states"])
+            if return_obs:
+                # traj["obs"].append(ObsUtils.unprocess_obs_dict(obs))
+                # traj["next_obs"].append(ObsUtils.unprocess_obs_dict(next_obs))
+                unprocessed_obs = ObsUtils.unprocess_obs_dict(obs)
+                unprocessed_next_obs = ObsUtils.unprocess_obs_dict(next_obs)
+                for key in unprocessed_obs:
+                    if key not in traj["obs"]:
+                        traj["obs"][key] = unprocessed_obs[key]
+                    else:
+                        traj["obs"][key] = np.vstack((traj["obs"][key], unprocessed_obs[key]))
+                for key in unprocessed_next_obs:
+                    if key not in traj["next_obs"]:
+                        traj["next_obs"][key] = unprocessed_next_obs[key]
+                    else:
+                        traj["next_obs"][key] = np.vstack((traj["obs"][key], unprocessed_next_obs[key]))
+
+            # break if done
+            if done or (terminate_on_success and success["task"]):
+                break
+
+            # update for next iter
+            obs = deepcopy(next_obs)
+            state_dict = env.get_state()
+
+        traj["actions"] = np.array(traj["actions"])
+        traj["rewards"] = np.array(traj["rewards"])
+        traj["dones"] = np.array(traj["dones"])
+        traj["states"] = np.array(traj["states"])
+
+    except env.rollout_exceptions as e:
+        print("WARNING: got rollout exception {}".format(e))
+
+    results["Return"] = total_reward
+    results["Horizon"] = step_i + 1
+    results["Success_Rate"] = float(success["task"])
+
+    # log additional success metrics
+    for k in success:
+        if k != "task":
+            results["{}_Success_Rate".format(k)] = float(success[k])
+
+    return results, traj
+
+
 def rollout_with_stats(
         policy,
         envs,
@@ -375,6 +515,130 @@ def rollout_with_stats(
         video_writer.close()
 
     return all_rollout_logs, video_paths
+
+
+def rollout_with_stats_and_traj(
+        policy,
+        envs,
+        horizon,
+        use_goals=False,
+        num_episodes=None,
+        render=False,
+        video_dir=None,
+        video_path=None,
+        epoch=None,
+        video_skip=5,
+        terminate_on_success=False,
+        verbose=False,
+    ):
+    """
+    A helper function used in the train loop to conduct evaluation rollouts per environment,
+    summarize the results, and returns the observations encountered.
+
+    Can specify @video_dir (to dump a video per environment) or @video_path (to dump a single video
+    for all environments).
+
+    Args:
+        policy (RolloutPolicy instance): policy to use for rollouts.
+
+        envs (dict): dictionary that maps env_name (str) to EnvBase instance. The policy will
+            be rolled out in each env.
+
+        horizon (int): maximum number of steps to roll the agent out for
+
+        use_goals (bool): if True, agent is goal-conditioned, so provide goal observations from env
+
+        num_episodes (int): number of rollout episodes per environment
+
+        render (bool): if True, render the rollout to the screen
+
+        video_dir (str): if not None, dump rollout videos to this directory (one per environment)
+
+        video_path (str): if not None, dump a single rollout video for all environments
+
+        epoch (int): epoch number (used for video naming)
+
+        video_skip (int): how often to write video frame
+
+        terminate_on_success (bool): if True, terminate episode early as soon as a success is encountered
+
+        verbose (bool): if True, print results of each rollout
+    
+    Returns:
+        all_rollout_logs (dict): dictionary of rollout statistics (e.g. return, success rate, ...) 
+            averaged across all rollouts 
+
+        video_paths (dict): path to rollout videos for each environment
+    """
+    assert isinstance(policy, RolloutPolicy)
+
+    all_rollout_logs = OrderedDict()
+
+    # handle paths and create writers for video writing
+    assert (video_path is None) or (video_dir is None), "rollout_with_stats: can't specify both video path and dir"
+    write_video = (video_path is not None) or (video_dir is not None)
+    video_paths = OrderedDict()
+    video_writers = OrderedDict()
+    if video_path is not None:
+        # a single video is written for all envs
+        video_paths = { k : video_path for k in envs }
+        video_writer = imageio.get_writer(video_path, fps=20)
+        video_writers = { k : video_writer for k in envs }
+    if video_dir is not None:
+        # video is written per env
+        video_str = "_epoch_{}.mp4".format(epoch) if epoch is not None else ".mp4" 
+        video_paths = { k : os.path.join(video_dir, "{}{}".format(k, video_str)) for k in envs }
+        video_writers = { k : imageio.get_writer(video_paths[k], fps=20) for k in envs }
+
+    for env_name, env in envs.items():
+        env_video_writer = None
+        if write_video:
+            print("video writes to " + video_paths[env_name])
+            env_video_writer = video_writers[env_name]
+
+        print("rollout: env={}, horizon={}, use_goals={}, num_episodes={}".format(
+            env.name, horizon, use_goals, num_episodes,
+        ))
+        rollout_logs = []
+        iterator = range(num_episodes)
+        if not verbose:
+            iterator = LogUtils.custom_tqdm(iterator, total=num_episodes)
+
+        num_success = 0
+        for ep_i in iterator:
+            rollout_timestamp = time.time()
+            rollout_info, traj = run_rollout_return_traj(
+                policy=policy,
+                env=env,
+                horizon=horizon,
+                render=render,
+                use_goals=use_goals,
+                video_writer=env_video_writer,
+                video_skip=video_skip,
+                terminate_on_success=terminate_on_success,
+            )
+            rollout_info["time"] = time.time() - rollout_timestamp
+            rollout_logs.append(rollout_info)
+            num_success += rollout_info["Success_Rate"]
+            if verbose:
+                print("Episode {}, horizon={}, num_success={}".format(ep_i + 1, horizon, num_success))
+                print(json.dumps(rollout_info, sort_keys=True, indent=4))
+
+        if video_dir is not None:
+            # close this env's video writer (next env has it's own)
+            env_video_writer.close()
+
+        # average metric across all episodes
+        rollout_logs = dict((k, [rollout_logs[i][k] for i in range(len(rollout_logs))]) for k in rollout_logs[0])
+        rollout_logs_mean = dict((k, np.mean(v)) for k, v in rollout_logs.items())
+        rollout_logs_mean["Time_Episode"] = np.sum(rollout_logs["time"]) / 60. # total time taken for rollouts in minutes
+        all_rollout_logs[env_name] = rollout_logs_mean
+
+    if video_path is not None:
+        # close video writer that was used for all envs
+        video_writer.close()
+
+    return all_rollout_logs, video_paths, traj
 
 
 def should_save_from_rollout_logs(
@@ -585,3 +849,61 @@ def is_every_n_steps(interval, current_step, skip_zero=False):
     if skip_zero and current_step == 0:
         return False
     return current_step % interval == 0
+
+
+def label_traj_with_expert_actions(expert_policy, obs_dict):
+    """
+    Use expert_policy to label a given trajectory with expert actions.
+
+    Args:
+        expert_policy (RolloutPolicy instance): policy that provide actions
+
+        obs_dict (dict): series of observations to be labeled with expert actions
+
+    Returns:
+        expert_actions (array): n x d array of expert actions where
+            n = number of transitions in the input obs and
+            d = dimension of action space
+    """
+    assert isinstance(expert_policy, RolloutPolicy)
+    expert_policy.start_episode()
+    expert_actions = []
+
+    for ob in obs_dict:
+        ac = expert_policy(ob)
+        expert_actions.append(ac)
+
+    expert_actions = np.array(expert_actions)
+
+    return expert_actions
+
+def aggregate_dataset(expert_policy, traj, datafile_path):
+    """
+    Use expert_policy to label a given trajectory with expert actions,
+    then adds the trajectories with expert actions to the datafile provided
+
+    Args:
+        expert_policy (RolloutPolicy instance): policy that provide actions
+
+        traj (dict): output of run_rollout_return_traj
+
+        datafile_path: path to hdf5 file that will be aggregated
+    """
+    assert isinstance(expert_policy, RolloutPolicy)
+    obs_dict = traj["obs"]
+    
+    # get expert actions
+    expert_policy.start_episode()
+    expert_actions = []
+    # obs = {key: None for key in obs_dict.keys()}
+    horizon = traj["actions"].shape[0]
+
+    for i in range(horizon):
+        ob = {key: obs_dict[key][i] for key in obs_dict.keys()}
+        ac = expert_policy(ob)
+        expert_actions.append(ac)
+
+    expert_actions = np.array(expert_actions)
+
+    file = h5py.File(datafile_path)
+    n_traj = len(file["data"])

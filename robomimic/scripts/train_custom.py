@@ -16,6 +16,7 @@ Args:
 """
 
 import argparse
+from copy import deepcopy
 import json
 import numpy as np
 import time
@@ -41,16 +42,23 @@ from robomimic.config import config_factory
 from robomimic.algo import algo_factory, RolloutPolicy
 from robomimic.utils.log_utils import PrintLogger, DataLogger
 
+import shutil
 import pdb
 
 def train(config, device):
     """
     Train a model using the algorithm.
     """
-
     # first set seeds
     np.random.seed(config.train.seed)
     torch.manual_seed(config.train.seed)
+
+    ###### Special Case for DAgger ######
+    use_dagger = False
+    if config.algo.dagger.enabled:
+        assert config.experiment.rollout.enabled, "To use DAgger, rollout must be enabled in config"
+        use_dagger = True
+        print("~~~~~~~DAgger~~~~~~~~")  
 
     print("\n============= New Training Run with Config =============")
     print(config)
@@ -67,19 +75,27 @@ def train(config, device):
     ObsUtils.initialize_obs_utils_with_config(config)
 
     # make sure the dataset exists
-    dataset_path = os.path.expanduser(config.train.data)
+    if use_dagger:
+        dataset_path = config.algo.dagger.original_data
+    else:
+        dataset_path = os.path.expanduser(config.train.data)
     if not os.path.exists(dataset_path):
         raise Exception("Dataset at provided path {} not found!".format(dataset_path))
 
     # load basic metadata from training file
     print("\n============= Loaded Environment Metadata =============")
-    env_meta = FileUtils.get_env_metadata_from_dataset(dataset_path=config.train.data)
+    # env_meta = FileUtils.get_env_metadata_from_dataset(dataset_path=config.train.data)    
+    # shape_meta = FileUtils.get_shape_metadata_from_dataset(
+    #     dataset_path=config.train.data,
+    #     all_obs_keys=config.all_obs_keys,
+    #     verbose=True
+    # )
+    env_meta = FileUtils.get_env_metadata_from_dataset(dataset_path=dataset_path)
     shape_meta = FileUtils.get_shape_metadata_from_dataset(
-        dataset_path=config.train.data,
+        dataset_path=dataset_path,
         all_obs_keys=config.all_obs_keys,
         verbose=True
     )
-
     if config.experiment.env is not None:
         env_meta["env_name"] = config.experiment.env
         print("=" * 30 + "\n" + "Replacing Env to {}\n".format(env_meta["env_name"]) + "=" * 30)
@@ -114,6 +130,12 @@ def train(config, device):
     )
 
     # initialize model
+    if use_dagger:
+        expert_policy, ckpt_dict = FileUtils.policy_from_checkpoint(ckpt_path=config.algo.dagger.expert_model, device=device, verbose=True)
+        expert_policy = RolloutPolicy(expert_policy.policy)
+        print("!!!! Loaded Pretrained Expert !!!!!")
+        expert_config, _ = FileUtils.config_from_checkpoint(ckpt_dict=ckpt_dict)
+    
     model = algo_factory(
         algo_name=config.algo_name,
         config=config,
@@ -121,18 +143,34 @@ def train(config, device):
         ac_dim=shape_meta["ac_dim"],
         device=device,
     )
-    
+    print("!!!!! Initialized New Model !!!!!")    
+
     # save the config as a json file
     with open(os.path.join(log_dir, '..', 'config.json'), 'w') as outfile:
         json.dump(config, outfile, indent=4)
+    if use_dagger:
+        with open(os.path.join(log_dir, "..", "expert_config"), 'w') as outfile:
+            json.dump(expert_config, outfile, indent=4)
 
     print("\n============= Model Summary =============")
     print(model)  # print model summary
     print("")
 
     # load training data
-    trainset, validset = TrainUtils.load_data_for_training(
-        config, obs_keys=shape_meta["all_obs_keys"])
+    if use_dagger:
+        """
+        If using DAgger, the original dataset used to train the expert should be given
+        in config.algo.dagger.original_data. The new aggeregated dataset is saved to
+        path specified in config.train.data.
+        """
+        new_datafile = os.path.join(log_dir, '..', 'aggr_data.hdf5')
+        shutil.copyfile(config.algo.dagger.original_data, new_datafile)
+        trainset, validset = TrainUtils.load_data_for_training(
+            config, obs_keys=shape_meta["all_obs_keys"])
+    else:
+        trainset, validset = TrainUtils.load_data_for_training(
+            config, obs_keys=shape_meta["all_obs_keys"])
+    
     train_sampler = trainset.get_dataset_sampler()
     print("\n============= Training Dataset =============")
     print(trainset)
@@ -237,22 +275,43 @@ def train(config, device):
         if config.experiment.rollout.enabled and (epoch > config.experiment.rollout.warmstart) and rollout_check:
 
             # wrap model as a RolloutPolicy to prepare for rollouts
-            rollout_model = RolloutPolicy(model, obs_normalization_stats=obs_normalization_stats)
+            rollout_model = RolloutPolicy(model, obs_normalization_stats=obs_normalization_stats) # TODO-maybe edit this instead of block below?
 
             num_episodes = config.experiment.rollout.n
-            all_rollout_logs, video_paths = TrainUtils.rollout_with_stats(
-                policy=rollout_model,
-                envs=envs,
-                horizon=config.experiment.rollout.horizon,
-                use_goals=config.use_goals,
-                num_episodes=num_episodes,
-                render=False,
-                video_dir=video_dir if config.experiment.render_video else None,
-                epoch=epoch,
-                video_skip=config.experiment.get("video_skip", 5),
-                terminate_on_success=config.experiment.rollout.terminate_on_success,
-            )
+            if use_dagger:
+                # if using DAgger, return the rollout trajectories as well
+                all_rollout_logs, video_paths, rollout_traj = TrainUtils.rollout_with_stats_and_traj(
+                    policy=rollout_model,
+                    envs=envs,
+                    horizon=config.experiment.rollout.horizon,
+                    use_goals=config.use_goals,
+                    num_episodes=num_episodes,
+                    render=False,
+                    video_dir=video_dir if config.experiment.render_video else None,
+                    epoch=epoch,
+                    video_skip=config.experiment.get("video_skip", 5),
+                    terminate_on_success=config.experiment.rollout.terminate_on_success,
+                )
 
+                # TODO - label the rollout trajectories with expert actions
+                # expert_actions = TrainUtils.label_traj_with_expert_actions(expert_policy, rollout_traj["obs"])
+                # TODO - update the dataset with the new trajectories, reinitialize trainset, train_sampler, train_loader
+                TrainUtils.aggregate_dataset(expert_policy, rollout_traj, new_datafile)
+
+            else:
+                all_rollout_logs, video_paths = TrainUtils.rollout_with_stats(
+                    policy=rollout_model,
+                    envs=envs,
+                    horizon=config.experiment.rollout.horizon,
+                    use_goals=config.use_goals,
+                    num_episodes=num_episodes,
+                    render=False,
+                    video_dir=video_dir if config.experiment.render_video else None,
+                    epoch=epoch,
+                    video_skip=config.experiment.get("video_skip", 5),
+                    terminate_on_success=config.experiment.rollout.terminate_on_success,
+                )
+            pdb.set_trace()
             # summarize results from rollouts to tensorboard and terminal
             for env_name in all_rollout_logs:
                 rollout_logs = all_rollout_logs[env_name]

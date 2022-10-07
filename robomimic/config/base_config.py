@@ -10,6 +10,8 @@ from copy import deepcopy
 import robomimic
 from robomimic.config.config import Config
 
+import pdb
+
 # global dictionary for remembering name - class mappings
 REGISTERED_CONFIGS = {}
 
@@ -57,6 +59,7 @@ class BaseConfig(Config):
         self.algo_name = type(self).ALGO_NAME
 
         self.experiment_config()
+        self.expert_config()
         self.train_config()
         self.algo_config()
         self.observation_config()
@@ -118,6 +121,19 @@ class BaseConfig(Config):
         self.experiment.rollout.rate = 50                           # do rollouts every @rate epochs
         self.experiment.rollout.warmstart = 0                       # number of epochs to wait before starting rollouts
         self.experiment.rollout.terminate_on_success = True         # end rollout early after task success
+
+    def expert_config(self):
+        """
+        This function populates the `config.train` attribute of the config, which 
+        has settings related to loading a pretrained model, such as whether to
+        start training from a pretrained model, and the path of the pretrained
+        model.
+        """
+        # Whether to load pretrained model
+        self.expert.load_expert = False
+
+        # Path to .pth file of pretrained model
+        self.expert.expert_model = None
 
     def train_config(self):
         """

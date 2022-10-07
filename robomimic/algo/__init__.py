@@ -1,7 +1,7 @@
 from robomimic.algo.algo import register_algo_factory_func, algo_name_to_factory_func, algo_factory, Algo, PolicyAlgo, ValueAlgo, PlannerAlgo, HierarchicalAlgo, RolloutPolicy
 
 # note: these imports are needed to register these classes in the global algo registry
-from robomimic.algo.bc import BC, BC_Gaussian, BC_GMM, BC_VAE, BC_RNN, BC_RNN_GMM
+from robomimic.algo.bc import BC, BC_Gaussian, BC_GMM, BC_VAE, BC_RNN, BC_RNN_GMM, BC_DAgger
 from robomimic.algo.bcq import BCQ, BCQ_GMM, BCQ_Distributional
 from robomimic.algo.cql import CQL
 from robomimic.algo.gl import GL, GL_VAE, ValuePlanner
