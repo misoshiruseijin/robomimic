@@ -163,7 +163,8 @@ def train(config, device):
         in config.algo.dagger.original_data. The new aggeregated dataset is saved to
         path specified in config.train.data.
         """
-        new_datafile = os.path.join(log_dir, '..', 'aggr_data.hdf5')
+        # new_datafile = os.path.join(log_dir, '..', 'aggr_data.hdf5')
+        new_datafile = config.algo.dagger.new_data
         shutil.copyfile(config.algo.dagger.original_data, new_datafile)
         trainset, validset = TrainUtils.load_data_for_training(
             config, obs_keys=shape_meta["all_obs_keys"])
@@ -293,10 +294,19 @@ def train(config, device):
                     terminate_on_success=config.experiment.rollout.terminate_on_success,
                 )
 
-                # TODO - label the rollout trajectories with expert actions
-                # expert_actions = TrainUtils.label_traj_with_expert_actions(expert_policy, rollout_traj["obs"])
-                # TODO - update the dataset with the new trajectories, reinitialize trainset, train_sampler, train_loader
+                # update the dataset with the new trajectories, reinitialize trainset, train_sampler, train_loader
                 TrainUtils.aggregate_dataset(expert_policy, rollout_traj, new_datafile)
+                trainset, validset = TrainUtils.load_data_for_training(config, obs_keys=shape_meta["all_obs_keys"])
+                print("!!!! Confirm transet size has increased !!!!")
+                train_sampler = trainset.get_dataset_sampler()
+                train_loader = DataLoader(
+                    dataset=trainset,
+                    sampler=train_sampler,
+                    batch_size=config.train.batch_size,
+                    shuffle=(train_sampler is None),
+                    num_workers=config.train.num_data_workers,
+                    drop_last=True
+                )
 
             else:
                 all_rollout_logs, video_paths = TrainUtils.rollout_with_stats(
@@ -311,7 +321,7 @@ def train(config, device):
                     video_skip=config.experiment.get("video_skip", 5),
                     terminate_on_success=config.experiment.rollout.terminate_on_success,
                 )
-            pdb.set_trace()
+
             # summarize results from rollouts to tensorboard and terminal
             for env_name in all_rollout_logs:
                 rollout_logs = all_rollout_logs[env_name]

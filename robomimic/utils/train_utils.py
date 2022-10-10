@@ -604,6 +604,7 @@ def rollout_with_stats_and_traj(
         if not verbose:
             iterator = LogUtils.custom_tqdm(iterator, total=num_episodes)
 
+        trajectories = []
         num_success = 0
         for ep_i in iterator:
             rollout_timestamp = time.time()
@@ -620,6 +621,7 @@ def rollout_with_stats_and_traj(
             rollout_info["time"] = time.time() - rollout_timestamp
             rollout_logs.append(rollout_info)
             num_success += rollout_info["Success_Rate"]
+            trajectories.append(traj)
             if verbose:
                 print("Episode {}, horizon={}, num_success={}".format(ep_i + 1, horizon, num_success))
                 print(json.dumps(rollout_info, sort_keys=True, indent=4))
@@ -638,7 +640,7 @@ def rollout_with_stats_and_traj(
         # close video writer that was used for all envs
         video_writer.close()
 
-    return all_rollout_logs, video_paths, traj
+    return all_rollout_logs, video_paths, trajectories
 
 
 def should_save_from_rollout_logs(
@@ -877,7 +879,7 @@ def label_traj_with_expert_actions(expert_policy, obs_dict):
 
     return expert_actions
 
-def aggregate_dataset(expert_policy, traj, datafile_path):
+def aggregate_dataset(expert_policy, trajectories, datafile_path):
     """
     Use expert_policy to label a given trajectory with expert actions,
     then adds the trajectories with expert actions to the datafile provided
@@ -885,25 +887,50 @@ def aggregate_dataset(expert_policy, traj, datafile_path):
     Args:
         expert_policy (RolloutPolicy instance): policy that provide actions
 
-        traj (dict): output of run_rollout_return_traj
+        traj (list(dict)): output of run_rollout_return_traj
 
         datafile_path: path to hdf5 file that will be aggregated
     """
     assert isinstance(expert_policy, RolloutPolicy)
-    obs_dict = traj["obs"]
     
     # get expert actions
     expert_policy.start_episode()
-    expert_actions = []
-    # obs = {key: None for key in obs_dict.keys()}
-    horizon = traj["actions"].shape[0]
 
-    for i in range(horizon):
-        ob = {key: obs_dict[key][i] for key in obs_dict.keys()}
-        ac = expert_policy(ob)
-        expert_actions.append(ac)
-
-    expert_actions = np.array(expert_actions)
-
-    file = h5py.File(datafile_path)
+    # add new trajectories to dataset
+    file = h5py.File(datafile_path, "r+")
     n_traj = len(file["data"])
+    for i, traj in enumerate(trajectories):
+        expert_actions = []
+        obs_dict = traj["obs"]
+        horizon = traj["actions"].shape[0]
+        
+        # get expert action for each transition
+        for j in range(horizon):
+            ob = {key: obs_dict[key][j] for key in obs_dict.keys()}
+            ac = expert_policy(ob)
+            expert_actions.append(ac)
+
+        expert_actions = np.array(expert_actions)
+
+        traj["actions"] = expert_actions # replace actions with expert actions
+
+        # add demos to datafile
+        demo_group = file.create_group(f"data/demo_{i + n_traj}")
+        demo_group.attrs["num_samples"] = horizon
+        demo_group["actions"] = traj["actions"]
+        demo_group["dones"] = traj["dones"]
+        demo_group["rewards"] = traj["rewards"]
+        demo_group["states"] = traj["states"]
+        demo_group.create_group("obs")
+        demo_group.create_group("obs_next")
+
+        for key in traj["obs"]:
+            demo_group[f"obs/{key}"] = traj["obs"][key]
+            demo_group[f"next_obs/{key}"] = traj["next_obs"][key]
+
+        # add this demo to training mask
+        for mask in file["mask"].keys():
+            if not "valid" in mask:
+                new_mask = np.append(file[f"mask/{mask}"][:], np.string_(f"demo_{i + n_traj}"))
+                del file[f"mask/{mask}"]
+                file["mask"].create_dataset(mask, data=new_mask)
