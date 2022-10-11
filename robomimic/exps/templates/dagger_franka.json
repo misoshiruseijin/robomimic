@@ -10,7 +10,7 @@
         "save": {
             "enabled": true,
             "every_n_seconds": null,
-            "every_n_epochs": 50,
+            "every_n_epochs": 100,
             "epochs": [],
             "on_best_validation": false,
             "on_best_rollout_return": false,
@@ -28,19 +28,19 @@
             "enabled": true,
             "n": 10,
             "horizon": 200,
-            "rate": 50,
+            "rate": 100,
             "warmstart": 0,
             "terminate_on_success": false
         }
     },
     "train": {
-        "data": "/home/ayanoh/robomimic/franka_dagger_trained_models/aggr_data.hdf5",
+        "data": "/home/brainiacx-ws/robomimic/franka_dagger_trained_models/aggr_dataset.hdf5",
         "output_dir": "../franka_dagger_trained_models",
         "num_data_workers": 0,
         "hdf5_cache_mode": "all",
         "hdf5_use_swmr": true,
         "hdf5_normalize_obs": false,
-        "hdf5_filter_key": "train",
+        "hdf5_filter_key": null,
         "seq_length": 1,
         "dataset_keys": [
             "actions",
@@ -50,7 +50,7 @@
         "goal_mode": null,
         "cuda": true,
         "batch_size": 100,
-        "num_epochs": 2000,
+        "num_epochs": 800,
         "seed": 1
     },
     "algo": {
@@ -138,9 +138,10 @@
         },
         "dagger": {
             "enabled": true,
-            "expert_model": "/home/ayanoh/robomimic/dagger_test_expert_models/test/robosuite_lift_20percent/models/model_epoch_100.pth",
-            "original_data": "/home/ayanoh/robomimic/datasets/lift/ph/low_dim.hdf5",
-            "new_data": "/home/ayanoh/robomimic/bc_trained_models/aggr_data.hdf5",
+            "expert_model": "/home/brainiacx-ws/robomimic/dagger_test_expert_models/bctest_10traj/models/model_epoch_1200.pth",
+            "original_data": "/home/brainiacx-ws/robomimic/dagger_test_expert_models/bctest_10traj/bctraj_10train_1valid.hdf5",
+            "new_data": "/home/brainiacx-ws/robomimic/franka_dagger_trained_models/aggr_dataset.hdf5",
+            "add_n_traj": 1,
             "beta_decay": "indicator"
         }
     },

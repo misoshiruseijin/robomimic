@@ -301,6 +301,8 @@ def run_rollout_return_traj(
     policy.start_episode()
     obs = env.reset()
     state_dict = env.get_state()
+    if state_dict is None:
+        state_dict = {"states" : np.zeros(1)} # set dummy value
     
     goal_dict = None
     if use_goals:
@@ -372,6 +374,8 @@ def run_rollout_return_traj(
             # update for next iter
             obs = deepcopy(next_obs)
             state_dict = env.get_state()
+            if state_dict is None:
+                state_dict = {"states" : np.zeros(1)} # set dummy value
 
         traj["actions"] = np.array(traj["actions"])
         traj["rewards"] = np.array(traj["rewards"])
@@ -571,7 +575,6 @@ def rollout_with_stats_and_traj(
         video_paths (dict): path to rollout videos for each environment
     """
     assert isinstance(policy, RolloutPolicy)
-
     all_rollout_logs = OrderedDict()
 
     # handle paths and create writers for video writing

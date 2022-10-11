@@ -277,7 +277,6 @@ def train(config, device):
 
             # wrap model as a RolloutPolicy to prepare for rollouts
             rollout_model = RolloutPolicy(model, obs_normalization_stats=obs_normalization_stats) # TODO-maybe edit this instead of block below?
-
             num_episodes = config.experiment.rollout.n
             if use_dagger:
                 # if using DAgger, return the rollout trajectories as well
@@ -295,9 +294,8 @@ def train(config, device):
                 )
 
                 # update the dataset with the new trajectories, reinitialize trainset, train_sampler, train_loader
-                TrainUtils.aggregate_dataset(expert_policy, rollout_traj, new_datafile)
+                TrainUtils.aggregate_dataset(expert_policy, rollout_traj[:config.algo.dagger.add_n_traj], new_datafile)
                 trainset, validset = TrainUtils.load_data_for_training(config, obs_keys=shape_meta["all_obs_keys"])
-                print("!!!! Confirm transet size has increased !!!!")
                 train_sampler = trainset.get_dataset_sampler()
                 train_loader = DataLoader(
                     dataset=trainset,

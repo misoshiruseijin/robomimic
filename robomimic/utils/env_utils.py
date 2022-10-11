@@ -6,7 +6,6 @@ in dataset files.
 from copy import deepcopy
 import robomimic.envs.env_base as EB
 
-
 def get_env_class(env_meta=None, env_type=None, env=None):
     """
     Return env class from either env_meta, env_type, or env.
@@ -40,6 +39,9 @@ def get_env_class(env_meta=None, env_type=None, env=None):
     elif env_type == EB.EnvType.IG_MOMART_TYPE:
         from robomimic.envs.env_ig_momart import EnvGibsonMOMART
         return EnvGibsonMOMART
+    elif env_type == EB.EnvType.CUSTOM_FRANKA_TYPE:
+        from robomimic.envs.real_franka_env import RealFrankaEnv
+        return RealFrankaEnv
     raise Exception("code should never reach this point")
 
 

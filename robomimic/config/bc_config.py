@@ -86,6 +86,6 @@ class BCConfig(BaseConfig):
         self.algo.dagger.enabled = False            # whether to use DAgger
         self.algo.dagger.expert_model = None        # expert model path
         self.algo.dagger.original_data = None       # path to original dataset used to train the expert
-        self.algo.dagger.new_data = None                        # path to store aggregated data that is updated with every rollout
-        self.algo.dagger.rollout_every_epochs = 50  # how often to do rollout and add data
+        self.algo.dagger.new_data = None            # path to store aggregated data that is updated with every rollout
+        self.algo.dagger.add_n_traj = 1             # number of trajectories to add to the dataset after each rollout
         self.algo.dagger.beta_decay = "indicator"   # beta decay mode
