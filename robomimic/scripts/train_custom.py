@@ -191,7 +191,7 @@ def train(config, device):
         num_workers=config.train.num_data_workers,
         drop_last=True
     )
-
+    # pdb.set_trace()
     if config.experiment.validate:
         # cap num workers for validation dataset at 1
         num_workers = min(config.train.num_data_workers, 1)

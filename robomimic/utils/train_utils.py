@@ -788,10 +788,10 @@ def run_epoch(model, data_loader, epoch, validate=False, num_steps=None):
 
     data_loader_iter = iter(data_loader)
     for _ in LogUtils.custom_tqdm(range(num_steps)):
-
         # load next batch from data loader
         try:
             t = time.time()
+            pdb.set_trace()
             batch = next(data_loader_iter)
         except StopIteration:
             # reset for next dataset pass
