@@ -10,7 +10,7 @@
         "save": {
             "enabled": true,
             "every_n_seconds": null,
-            "every_n_epochs": 50,
+            "every_n_epochs": 1,
             "epochs": [],
             "on_best_validation": false,
             "on_best_rollout_return": false,
@@ -26,9 +26,9 @@
         "video_skip": 5,
         "rollout": {
             "enabled": true,
-            "n": 10,
+            "n": 1,
             "horizon": 200,
-            "rate": 50,
+            "rate": 1,
             "warmstart": 0,
             "terminate_on_success": false
         }

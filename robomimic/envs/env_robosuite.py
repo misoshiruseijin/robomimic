@@ -14,6 +14,8 @@ from robosuite.utils.mjcf_utils import postprocess_model_xml
 import robomimic.utils.obs_utils as ObsUtils
 import robomimic.envs.env_base as EB
 
+import pdb
+
 
 class EnvRobosuite(EB.EnvBase):
     """Wrapper class for robosuite environments (https://github.com/ARISE-Initiative/robosuite)"""

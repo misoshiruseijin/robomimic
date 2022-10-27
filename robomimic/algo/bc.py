@@ -88,7 +88,6 @@ class BC(PolicyAlgo):
             input_batch (dict): processed and filtered batch that
                 will be used for training 
         """
-        pdb.set_trace()
         input_batch = dict()
         input_batch["obs"] = {k: batch["obs"][k][:, 0, :] for k in batch["obs"]}
         input_batch["goal_obs"] = batch.get("goal_obs", None) # goals may not be present

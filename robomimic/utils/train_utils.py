@@ -791,7 +791,6 @@ def run_epoch(model, data_loader, epoch, validate=False, num_steps=None):
         # load next batch from data loader
         try:
             t = time.time()
-            pdb.set_trace()
             batch = next(data_loader_iter)
         except StopIteration:
             # reset for next dataset pass

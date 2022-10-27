@@ -1,172 +1,0 @@
-
-============= Initialized Observation Utils with Obs Spec =============
-
-using obs modality: low_dim with keys: ['robot0_delta_to_target', 'robot0_eef_pos']
-using obs modality: rgb with keys: []
-using obs modality: depth with keys: []
-using obs modality: scan with keys: []
-
-============= Loaded Environment Metadata =============
-obs key robot0_delta_to_target with shape (3,)
-obs key robot0_eef_pos with shape (3,)
-INIT
-START reset internal
-TARGET PLACED AT:  [-0.0248934   0.11016225  0.88004232]
-END reset internal
-Created environment with name ReachingFrankaBC
-Action size is 7
-ReachingFrankaBC
-{
-    "camera_depths": false,
-    "controller_configs": {
-        "control_delta": true,
-        "damping_ratio": 1,
-        "damping_ratio_limits": [
-            0,
-            10
-        ],
-        "impedance_mode": "fixed",
-        "input_max": 1,
-        "input_min": -1,
-        "interpolation": null,
-        "kp": 150,
-        "kp_limits": [
-            0,
-            300
-        ],
-        "orientation_limits": null,
-        "output_max": [
-            0.05,
-            0.05,
-            0.05,
-            0.5,
-            0.5,
-            0.5
-        ],
-        "output_min": [
-            -0.05,
-            -0.05,
-            -0.05,
-            -0.5,
-            -0.5,
-            -0.5
-        ],
-        "position_limits": null,
-        "ramp_ratio": 0.2,
-        "type": "OSC_POSE",
-        "uncouple_pos_ori": true
-    },
-    "has_offscreen_renderer": true,
-    "has_renderer": false,
-    "ignore_done": true,
-    "robots": "Panda",
-    "use_camera_obs": false,
-    "use_object_obs": true
-}
-
-
-============= Model Summary =============
-ObservationKeyToModalityDict: action not found, adding action to mapping with assumed low_dim modality!
-BC (
-  ModuleDict(
-    (policy): ActorNetwork(
-        action_dim=7
-  
-        encoder=ObservationGroupEncoder(
-            group=obs
-            ObservationEncoder(
-                Key(
-                    name=robot0_delta_to_target
-                    shape=[3]
-                    modality=low_dim
-                    randomizer=None
-                    net=None
-                    sharing_from=None
-                )
-                Key(
-                    name=robot0_eef_pos
-                    shape=[3]
-                    modality=low_dim
-                    randomizer=None
-                    net=None
-                    sharing_from=None
-                )
-                output_shape=[6]
-            )
-        )
-  
-        mlp=MLP(
-            input_dim=6
-            output_dim=1024
-            layer_dims=[1024]
-            layer_func=Linear
-            dropout=None
-            act=ReLU
-            output_act=ReLU
-        )
-  
-        decoder=ObservationDecoder(
-            Key(
-                name=action
-                shape=(7,)
-                modality=low_dim
-                net=(Linear(in_features=1024, out_features=7, bias=True))
-            )
-        )
-    )
-  )
-)
-
-SequenceDataset: loading dataset into memory...
-  0%|          | 0/45 [00:00<?, ?it/s]100%|##########| 45/45 [00:00<00:00, 473.37it/s]
-SequenceDataset: caching get_item calls...
-  0%|          | 0/24457 [00:00<?, ?it/s]  5%|4         | 1120/24457 [00:00<00:02, 11197.31it/s] 10%|9         | 2330/24457 [00:00<00:01, 11723.36it/s] 14%|#4        | 3536/24457 [00:00<00:01, 11871.30it/s] 19%|#9        | 4746/24457 [00:00<00:01, 11958.49it/s] 24%|##4       | 5953/24457 [00:00<00:01, 11995.89it/s] 29%|##9       | 7172/24457 [00:00<00:01, 12060.07it/s] 34%|###4      | 8386/24457 [00:00<00:01, 12083.19it/s] 39%|###9      | 9595/24457 [00:00<00:01, 12069.68it/s] 44%|####4     | 10802/24457 [00:00<00:01, 12053.99it/s] 49%|####9     | 12008/24457 [00:01<00:01, 11805.22it/s] 54%|#####4    | 13209/24457 [00:01<00:00, 11864.71it/s] 59%|#####8    | 14407/24457 [00:01<00:00, 11898.75it/s] 64%|######3   | 15629/24457 [00:01<00:00, 11993.96it/s] 69%|######8   | 16842/24457 [00:01<00:00, 12032.59it/s] 74%|#######3  | 18046/24457 [00:01<00:00, 12021.81it/s] 79%|#######8  | 19249/24457 [00:01<00:00, 12022.73it/s] 84%|########3 | 20457/24457 [00:01<00:00, 12037.34it/s] 89%|########8 | 21677/24457 [00:01<00:00, 12084.56it/s] 94%|#########3| 22886/24457 [00:01<00:00, 12030.15it/s] 98%|#########8| 24090/24457 [00:02<00:00, 11898.41it/s]100%|##########| 24457/24457 [00:02<00:00, 11964.87it/s]
-SequenceDataset: loading dataset into memory...
-  0%|          | 0/5 [00:00<?, ?it/s]100%|##########| 5/5 [00:00<00:00, 721.46it/s]
-SequenceDataset: caching get_item calls...
-  0%|          | 0/6208 [00:00<?, ?it/s] 19%|#8        | 1157/6208 [00:00<00:00, 11562.40it/s] 38%|###7      | 2343/6208 [00:00<00:00, 11732.50it/s] 57%|#####7    | 3541/6208 [00:00<00:00, 11842.69it/s] 76%|#######6  | 4726/6208 [00:00<00:00, 11828.64it/s] 96%|#########5| 5938/6208 [00:00<00:00, 11932.86it/s]100%|##########| 6208/6208 [00:00<00:00, 11854.85it/s]
-
-============= Training Dataset =============
-SequenceDataset (
-	path=/home/ayanoh/robosuite/robosuite/models/assets/demonstrations/franka_reaching_robosuite/franka_reaching_robosuite_50.hdf5
-	obs_keys=('robot0_delta_to_target', 'robot0_eef_pos')
-	seq_length=1
-	filter_key=train
-	frame_stack=1
-	pad_seq_length=True
-	pad_frame_stack=True
-	goal_mode=none
-	cache_mode=all
-	num_demos=45
-	num_sequences=24457
-)
-
-  0%|          | 0/100 [00:00<?, ?it/s]> /home/ayanoh/robomimic/robomimic/utils/train_utils.py(795)run_epoch()
--> batch = next(data_loader_iter)
-(Pdb) > /home/ayanoh/robomimic/robomimic/algo/bc.py(92)process_batch_for_training()
--> input_batch = dict()
-(Pdb) {'robot0_delta_to_target': tensor([], size=(2, 0, 3)), 'robot0_eef_pos': tensor([], size=(2, 0, 3))}
-(Pdb) *** SyntaxError: unexpected EOF while parsing
-(Pdb) *** IndexError: index 0 is out of bounds for dimension 1 with size 0
-(Pdb) 
-  0%|          | 0/100 [02:18<?, ?it/s]
-run failed with error:
-
-
-Traceback (most recent call last):
-  File "robomimic/scripts/train.py", line 358, in main
-    train(config, device=device)
-  File "robomimic/scripts/train.py", line 182, in train
-    step_log = TrainUtils.run_epoch(model=model, data_loader=train_loader, epoch=epoch, num_steps=train_num_steps)
-  File "/home/ayanoh/robomimic/robomimic/utils/train_utils.py", line 795, in run_epoch
-    batch = next(data_loader_iter)
-  File "/home/ayanoh/robomimic/robomimic/algo/bc.py", line 92, in process_batch_for_training
-    input_batch = dict()
-  File "/home/ayanoh/robomimic/robomimic/algo/bc.py", line 92, in process_batch_for_training
-    input_batch = dict()
-  File "/home/ayanoh/anaconda3/envs/robomimic/lib/python3.7/bdb.py", line 88, in trace_dispatch
-    return self.dispatch_line(frame)
-  File "/home/ayanoh/anaconda3/envs/robomimic/lib/python3.7/bdb.py", line 113, in dispatch_line
-    if self.quitting: raise BdbQuit
-bdb.BdbQuit
-
