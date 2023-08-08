@@ -42,6 +42,7 @@ def algo_config_to_class(algo_config):
     rnn_enabled = algo_config.rnn.enabled
     # support legacy configs that do not have "transformer" item
     transformer_enabled = ("transformer" in algo_config) and algo_config.transformer.enabled
+    mpdagger_enabled = ("mpdagger" in algo_config and algo_config.mpdagger.enabled) # motion planner DAgger (distilling-moma)
 
     if gaussian_enabled:
         if rnn_enabled:

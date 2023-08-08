@@ -41,6 +41,11 @@ def get_env_class(env_meta=None, env_type=None, env=None):
     elif env_type == EB.EnvType.IG_MOMART_TYPE:
         from robomimic.envs.env_ig_momart import EnvGibsonMOMART
         return EnvGibsonMOMART
+    elif env_type == EB.EnvType.OG_DISTILLING_MOMA_TYPE:
+        # TODO - clean this up
+        if env_meta["env_name"] == "NavPickEnv":
+            from robomimic.envs.nav_pick_env import NavPickEnv
+            return NavPickEnv
     raise Exception("code should never reach this point")
 
 
