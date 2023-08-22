@@ -117,7 +117,7 @@ class HBC(HierarchicalAlgo):
         with actor_obs_config.unlocked():
             actor_obs_config["goal"] = Config(**goal_obs_keys)
 
-        self.actor = policy_algo_class(
+        selfactor = policy_algo_class(
             algo_config=algo_config.actor,
             obs_config=actor_obs_config,
             global_config=global_config,
@@ -127,7 +127,7 @@ class HBC(HierarchicalAlgo):
         )
 
     def process_batch_for_training(self, batch):
-        """
+        """.
         Processes input batch from a data loader to filter out
         relevant information and prepare the batch for training.
 

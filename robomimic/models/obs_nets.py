@@ -1056,6 +1056,7 @@ class MIMO_Transformer(Module):
                 # first two dimensions should be [B, T] for inputs
                 if inputs[obs_group][k] is None:
                     continue
+                # breakpoint()
                 assert inputs[obs_group][k].ndim - 2 == len(self.input_obs_group_shapes[obs_group][k])
 
         inputs = inputs.copy()

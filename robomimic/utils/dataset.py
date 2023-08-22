@@ -338,6 +338,7 @@ class SequenceDataset(torch.utils.data.Dataset):
         obs_traj = {k: self.hdf5_file["data/{}/obs/{}".format(ep, k)][()].astype('float32') for k in self.obs_keys}
         obs_traj = ObsUtils.process_obs_dict(obs_traj)
         merged_stats = _compute_traj_stats(obs_traj)
+
         print("SequenceDataset: normalizing observations...")
         for ep in LogUtils.custom_tqdm(self.demos[1:]):
             obs_traj = {k: self.hdf5_file["data/{}/obs/{}".format(ep, k)][()].astype('float32') for k in self.obs_keys}
@@ -350,6 +351,7 @@ class SequenceDataset(torch.utils.data.Dataset):
             # note we add a small tolerance of 1e-3 for std
             obs_normalization_stats[k]["mean"] = merged_stats[k]["mean"]
             obs_normalization_stats[k]["std"] = np.sqrt(merged_stats[k]["sqdiff"] / merged_stats[k]["n"]) + 1e-3
+        # breakpoint()
         return obs_normalization_stats
 
     def get_obs_normalization_stats(self):

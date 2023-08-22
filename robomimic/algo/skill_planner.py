@@ -107,11 +107,10 @@ class SkillPlanner(PlannerAlgo):
                 will be used for training 
         """
         input_batch = dict()
-
         # remove temporal batches for all except scalar signals (to be compatible with model outputs)
         input_batch["obs"] = {k: batch["obs"][k][:, 0, :] for k in batch["obs"]}
         input_batch["goal_obs"] = batch.get("goal_obs", None) # goals may not be present
-        input_batch["skills"] = {k: batch["skills"][k][:, 0, :] for k in batch["obs"]}
+        input_batch["skills"] = batch["skills"][:, 0]
 
         # we move to device first before float conversion because image observation modalities will be uint8 -
         # this minimizes the amount of data transferred to GPU
@@ -141,6 +140,7 @@ class SkillPlanner(PlannerAlgo):
 
             info["predictions"] = TensorUtils.detach(predictions)
             info["losses"] = TensorUtils.detach(losses)
+            info["accuracy"] = (predictions["skill"].argmax(dim=1) == batch["skills"]).float().mean()
 
             if not validate:
                 step_info = self._train_step(losses)
@@ -181,7 +181,7 @@ class SkillPlanner(PlannerAlgo):
         losses = OrderedDict()
         skill_logits = predictions["actions"]
         skill_targets = batch["actions"]
-        losses["skill_classification_loss"] = nn.CrossEngropy()(skill_logits, skill_targets)
+        losses["skill_classification_loss"] = nn.CrossEntropy()(skill_logits, skill_targets)
         return losses
 
     def _train_step(self, losses):

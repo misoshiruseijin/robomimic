@@ -855,6 +855,11 @@ class Conv1dBase(Module):
         # Generate network
         self.n_layers = len(out_channels)
         layers = OrderedDict()
+        conv_kwargs = { 
+            "out_channels" : out_channels, 
+            "kernel_size" : kernel_size, 
+            "stride" : stride, 
+        } 
         for i in range(self.n_layers):
             layer_kwargs = {k: v[i] for k, v in conv_kwargs.items()}
             layers[f'conv{i}'] = nn.Conv1d(

@@ -385,7 +385,6 @@ def process_frame(frame, channel_dim, scale):
 
     return frame
 
-
 def unprocess_obs(obs, obs_modality=None, obs_key=None):
     """
     Prepare observation @obs corresponding to @obs_modality modality (or implicitly inferred from @obs_key)
@@ -424,7 +423,6 @@ def unprocess_obs_dict(obs_dict):
     """
     return { k : unprocess_obs(obs=obs, obs_key=k) for k, obs in obs_dict.items() } # shallow copy
 
-
 def unprocess_frame(frame, channel_dim, scale):
     """
     Given frame prepared for network input, prepare for saving to dataset.
@@ -459,7 +457,6 @@ def get_processed_shape(obs_modality, input_shape):
     """
     return list(process_obs(obs=np.zeros(input_shape), obs_modality=obs_modality).shape)
 
-
 def normalize_obs(obs_dict, obs_normalization_stats):
     """
     Normalize observations using the provided "mean" and "std" entries 
@@ -486,6 +483,8 @@ def normalize_obs(obs_dict, obs_normalization_stats):
         std = obs_normalization_stats[m]["std"]
 
         # check shape consistency
+        print("mean shape", mean.shape)
+        print("obs shape", obs_dict[m].shape)
         shape_len_diff = len(mean.shape) - len(obs_dict[m].shape)
         assert shape_len_diff in [0, 1], "shape length mismatch in @normalize_obs"
         assert mean.shape[shape_len_diff:] == obs_dict[m].shape, "shape mismatch in @normalize obs"
@@ -498,7 +497,6 @@ def normalize_obs(obs_dict, obs_normalization_stats):
         obs_dict[m] = (obs_dict[m] - mean) / std
 
     return obs_dict
-
 
 def has_modality(modality, obs_keys):
     """

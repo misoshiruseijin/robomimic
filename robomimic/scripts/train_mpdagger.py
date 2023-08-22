@@ -34,7 +34,7 @@ import torch
 from torch.utils.data import DataLoader
 
 import robomimic
-import robomimic.utils.train_utils as TrainUtils
+import robomimic.utils.mpdagger_train_utils as TrainUtils
 import robomimic.utils.torch_utils as TorchUtils
 import robomimic.utils.obs_utils as ObsUtils
 import robomimic.utils.env_utils as EnvUtils
@@ -44,7 +44,7 @@ from robomimic.algo import algo_factory, RolloutPolicy
 from robomimic.utils.log_utils import PrintLogger, DataLogger, flush_warnings
 
 
-def train(config, device):
+def train_mpdagger(config, device):
     """
     Train a model using the algorithm.
     """
@@ -73,6 +73,12 @@ def train(config, device):
     dataset_path = os.path.expanduser(config.train.data)
     if not os.path.exists(dataset_path):
         raise Exception("Dataset at provided path {} not found!".format(dataset_path))
+    
+    # Since training aggregates the datafile, make a copy of dataset and aggreate on the copy to avoid overwriting the original file
+    print("Making a copy of the dataset. This may take a while...")
+    origial_dataset_path = dataset_path
+    dataset_path = dataset_path.split(".")[0] + "_aggr.hdf5"
+    # shutil.copy2(src=original_dataset_path, dst=dataset_path) # TODO - uncomment this
 
     # load basic metadata from training file
     print("\n============= Loaded Environment Metadata =============")
@@ -92,7 +98,6 @@ def train(config, device):
     if config.experiment.rollout.enabled:
         # create environments for validation runs
         env_names = [env_meta["env_name"]]
-
         if config.experiment.additional_envs is not None:
             for name in config.experiment.additional_envs:
                 env_names.append(name)
@@ -110,15 +115,6 @@ def train(config, device):
             print(envs[env.name])
 
     print("")
-    # Make sure rollouts are enabled if MP-DAgger is enabled
-    mpdagger_enabled = ("mpdagger" in config.algo and config.algo.mpdagger.enabled)
-    if mpdagger_enabled:
-        assert config.experiment.rollout.enabled, "Rollouts must be enabled when MP-DAgger"
-        # initialize expert
-        mpdagger_expert = env.controller
-    else:
-        raise Exception("MP-DAgger is not enabled. If not using MP-DAgger, use train.py instead.")
-
 
     # setup for a new training run
     data_logger = DataLogger(
@@ -270,7 +266,10 @@ def train(config, device):
             rollout_model = RolloutPolicy(model, obs_normalization_stats=obs_normalization_stats)
 
             num_episodes = config.experiment.rollout.n
-            all_rollout_logs, video_paths = TrainUtils.rollout_with_stats(
+
+            # TODO - here, get the expert rollout trajectories 
+            breakpoint()
+            all_rollout_logs, video_paths, expert_trajectories = TrainUtils.rollout_with_stats_and_expert_traj(
                 policy=rollout_model,
                 envs=envs,
                 horizon=config.experiment.rollout.horizon,
@@ -282,6 +281,11 @@ def train(config, device):
                 video_skip=config.experiment.get("video_skip", 5),
                 terminate_on_success=config.experiment.rollout.terminate_on_success,
             )
+
+            # TODO - aggregate dataset
+            # append new trajectories to hdf5 file
+
+            # create a new Dataset and DataLoader
 
             # summarize results from rollouts to tensorboard and terminal
             for env_name in all_rollout_logs:

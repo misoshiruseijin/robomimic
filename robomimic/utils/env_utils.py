@@ -42,10 +42,11 @@ def get_env_class(env_meta=None, env_type=None, env=None):
         from robomimic.envs.env_ig_momart import EnvGibsonMOMART
         return EnvGibsonMOMART
     elif env_type == EB.EnvType.OG_DISTILLING_MOMA_TYPE:
-        # TODO - clean this up
-        if env_meta["env_name"] == "NavPickEnv":
-            from robomimic.envs.nav_pick_env import NavPickEnv
-            return NavPickEnv
+        # TODO - need to clean this up to make it more general
+        import sys
+        sys.path.append("/home/svl/distilling-moma")
+        from envs.nav_pick_env import NavPickEnv
+        return NavPickEnv
     raise Exception("code should never reach this point")
 
 
@@ -228,7 +229,7 @@ def create_env_from_metadata(
         use_image_obs=use_image_obs, 
         **env_kwargs,
     )
-    check_env_version(env, env_meta)
+    # check_env_version(env, env_meta)
     return env
 
 
