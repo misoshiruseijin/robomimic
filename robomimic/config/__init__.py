@@ -11,3 +11,4 @@ from robomimic.config.hbc_config import HBCConfig
 from robomimic.config.iris_config import IRISConfig
 from robomimic.config.td3_bc_config import TD3_BCConfig
 from robomimic.config.skill_planner_config import SkillPlannerConfig
+from robomimic.config.error_detector_config import ErrorDetectorConfig

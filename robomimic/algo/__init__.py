@@ -9,4 +9,5 @@ from robomimic.algo.gl import GL, GL_VAE, ValuePlanner
 from robomimic.algo.hbc import HBC
 from robomimic.algo.iris import IRIS
 from robomimic.algo.td3_bc import TD3_BC
+from robomimic.algo.error_detector import ErrorDetector, ConditionalErrorDetector
 from robomimic.algo.skill_planner import SkillPlanner
