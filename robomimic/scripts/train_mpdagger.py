@@ -76,9 +76,12 @@ def train_mpdagger(config, device):
     
     # Since training aggregates the datafile, make a copy of dataset and aggreate on the copy to avoid overwriting the original file
     print("Making a copy of the dataset. This may take a while...")
-    origial_dataset_path = dataset_path
-    dataset_path = dataset_path.split(".")[0] + "_aggr.hdf5"
-    # shutil.copy2(src=original_dataset_path, dst=dataset_path) # TODO - uncomment this
+    original_dataset_path = dataset_path
+    aggr_dataset_path = dataset_path.split(".")[0] + "_aggr.hdf5"
+    shutil.copy2(src=original_dataset_path, dst=aggr_dataset_path) # TODO - uncomment this
+    print(f"Done making a copy of the dataset. Aggregated dataset will be saved at {aggr_dataset_path}")
+    # overwrite config with new dataset path
+    config.train.data = aggr_dataset_path
 
     # load basic metadata from training file
     print("\n============= Loaded Environment Metadata =============")
@@ -102,15 +105,27 @@ def train_mpdagger(config, device):
             for name in config.experiment.additional_envs:
                 env_names.append(name)
 
+        sys.path.append("../")
+        sys.path.append("../distilling-moma")
+        from Omnimimic.envs.skill_rollout_wrapper import OmnimimicSkillRolloutWrapper
+        from envs.nav_pick_env import NavPickEnv
         for env_name in env_names:
-            env = EnvUtils.create_env_from_metadata(
-                env_meta=env_meta,
-                env_name=env_name,
-                render=False, 
-                render_offscreen=config.experiment.render_video,
-                use_image_obs=shape_meta["use_images"], 
+            env = OmnimimicSkillRolloutWrapper(
+                env=NavPickEnv(
+                    **env_meta["env_kwargs"]
+                ),
+                obs_modalities=["proprio", "rgb", "depth", "rgb_wrist", "depth_wrist", "scan"],
+                path=aggr_dataset_path,
             )
-            env = EnvUtils.wrap_env_from_config(env, config=config) # apply environment warpper, if applicable
+            # TODO - above is for testing. change to use below
+            # env = EnvUtils.create_env_from_metadata(
+            #     env_meta=env_meta,
+            #     env_name=env_name,
+            #     render=False, 
+            #     render_offscreen=config.experiment.render_video,
+            #     use_image_obs=shape_meta["use_images"], 
+            # )
+            # env = EnvUtils.wrap_env_from_config(env, config=config) # apply environment warpper, if applicable
             envs[env.name] = env
             print(envs[env.name])
 
@@ -139,47 +154,8 @@ def train_mpdagger(config, device):
     print(model)  # print model summary
     print("")
 
-    # load training data
-    trainset, validset = TrainUtils.load_data_for_training(
-        config, obs_keys=shape_meta["all_obs_keys"])
-    train_sampler = trainset.get_dataset_sampler()
-    print("\n============= Training Dataset =============")
-    print(trainset)
-    print("")
-    if validset is not None:
-        print("\n============= Validation Dataset =============")
-        print(validset)
-        print("")
-
-    # maybe retreve statistics for normalizing observations
-    obs_normalization_stats = None
-    if config.train.hdf5_normalize_obs:
-        obs_normalization_stats = trainset.get_obs_normalization_stats()
-
-    # initialize data loaders
-    train_loader = DataLoader(
-        dataset=trainset,
-        sampler=train_sampler,
-        batch_size=config.train.batch_size,
-        shuffle=(train_sampler is None),
-        num_workers=config.train.num_data_workers,
-        drop_last=True
-    )
-
-    if config.experiment.validate:
-        # cap num workers for validation dataset at 1
-        num_workers = min(config.train.num_data_workers, 1)
-        valid_sampler = validset.get_dataset_sampler()
-        valid_loader = DataLoader(
-            dataset=validset,
-            sampler=valid_sampler,
-            batch_size=config.train.batch_size,
-            shuffle=(valid_sampler is None),
-            num_workers=num_workers,
-            drop_last=True
-        )
-    else:
-        valid_loader = None
+    # Initialize dataloaders
+    train_loader, valid_loader, obs_normalization_stats = TrainUtils.initialize_dataloaders(config=config, shape_meta=shape_meta)
 
     # print all warnings before training begins
     print("*" * 50)
@@ -267,25 +243,30 @@ def train_mpdagger(config, device):
 
             num_episodes = config.experiment.rollout.n
 
-            # TODO - here, get the expert rollout trajectories 
-            breakpoint()
-            all_rollout_logs, video_paths, expert_trajectories = TrainUtils.rollout_with_stats_and_expert_traj(
+            # Close hdf5 file before rollouts
+            train_loader.dataset.close_and_delete_hdf5_handle()
+            if valid_loader is not None:
+                valid_loader.dataset.close_and_delete_hdf5_handle()
+
+            # Datafile gets aggregated here
+            all_rollout_logs, video_paths, n_added_traj = TrainUtils.rollout_with_stats(
                 policy=rollout_model,
                 envs=envs,
                 horizon=config.experiment.rollout.horizon,
                 use_goals=config.use_goals,
                 num_episodes=num_episodes,
                 render=False,
-                video_dir=video_dir if config.experiment.render_video else None,
+                video_dir=video_dir if config.experiment.render_video else None, # TODO rendering is not supported yet - implement it in moma_wrapper
                 epoch=epoch,
                 video_skip=config.experiment.get("video_skip", 5),
                 terminate_on_success=config.experiment.rollout.terminate_on_success,
             )
 
-            # TODO - aggregate dataset
-            # append new trajectories to hdf5 file
-
-            # create a new Dataset and DataLoader
+            # TODO
+            # if trajectories were added to dataset, reinitialize Dataset and DataLoader using updated hdf5 file
+            if n_added_traj > 0:
+                print(f"\n Added {n_added_traj} expert trajectories to dataset. Reinitializing dataloaders with updated datafile")
+                train_loader, valid_loader, obs_normalization_stats = TrainUtils.initialize_dataloaders(config=config, shape_meta=shape_meta)
 
             # summarize results from rollouts to tensorboard and terminal
             for env_name in all_rollout_logs:

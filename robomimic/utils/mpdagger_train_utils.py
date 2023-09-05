@@ -15,6 +15,7 @@ from copy import deepcopy
 from collections import OrderedDict
 
 import torch
+from torch.utils.data import DataLoader
 
 import robomimic
 import robomimic.utils.tensor_utils as TensorUtils
@@ -78,7 +79,6 @@ def get_exp_dir(config, auto_remove_exp_dir=False):
     os.makedirs(video_dir)
     return log_dir, output_dir, video_dir
 
-
 def load_data_for_training(config, obs_keys):
     """
     Data loading at the start of an algorithm.
@@ -123,7 +123,6 @@ def load_data_for_training(config, obs_keys):
 
     return train_dataset, valid_dataset
 
-
 def dataset_factory(config, obs_keys, filter_by_attribute=None, dataset_path=None):
     """
     Create a SequenceDataset instance to pass to a torch DataLoader.
@@ -166,6 +165,218 @@ def dataset_factory(config, obs_keys, filter_by_attribute=None, dataset_path=Non
 
     return dataset
 
+# def run_rollout(
+#         policy, 
+#         env, 
+#         horizon,
+#         use_goals=False,
+#         render=False,
+#         video_writer=None,
+#         video_skip=5,
+#         terminate_on_success=False,
+#     ):
+#     """
+#     Runs a rollout in an environment with the current network parameters.
+
+#     Args:
+#         policy (RolloutPolicy instance): policy to use for rollouts.
+
+#         env (EnvBase instance): environment to use for rollouts.
+
+#         horizon (int): maximum number of steps to roll the agent out for
+
+#         use_goals (bool): if True, agent is goal-conditioned, so provide goal observations from env
+
+#         render (bool): if True, render the rollout to the screen
+
+#         video_writer (imageio Writer instance): if not None, use video writer object to append frames at 
+#             rate given by @video_skip
+
+#         video_skip (int): how often to write video frame
+
+#         terminate_on_success (bool): if True, terminate episode early as soon as a success is encountered
+
+#     Returns:
+#         results (dict): dictionary containing return, success rate, etc.
+#         traj (dict): dictionary containing rollout trajectory where expert was in control. Could be empty if expert was never in control.
+#     """
+
+#     # dummy functions for testing
+#     def get_dummy_action():
+#         # return np.zeros(env.action_dimension)
+#         return np.random.uniform(-10, 10, env.action_dimension)
+#     def policy_needs_help():
+#         return True
+
+#     assert isinstance(policy, RolloutPolicy)
+#     assert isinstance(env, EnvBase) or isinstance(env, EnvWrapper)
+
+#     policy.start_episode()
+
+#     ob_dict = env.reset()
+#     goal_dict = None
+#     if use_goals:
+#         # retrieve goal from the environment
+#         goal_dict = env.get_goal()
+
+#     results = {}
+#     video_count = 0  # video frame counter
+
+#     total_reward = 0.
+#     success = { k: False for k in env.is_success() } # success metrics
+
+#     # keep track of rollout trajectories
+#     traj = {
+#         "obs" : [],
+#         "next_obs" : [],
+#         "actions" : [],
+#         "rewards" : [],
+#         "dones" : [],
+#     }
+
+#     is_expert_in_control = False
+
+#     try:
+#         for step_i in range(horizon):
+
+#             # NOTE : for now, once expert takes control, the expert finishes this episode without handing control back to student
+#             if not is_expert_in_control and policy_needs_help(): # TODO - implement this
+#                 is_expert_in_control = True
+            
+#             ######## Case: Expert is in Control ########
+#             # NOTE: this ignores rollout horizon and executes expert actions until success or failure
+#             if is_expert_in_control:
+
+#                 # TODO - below is a placeholder. Implement a function that returns the correct generator 
+#                 ac_generator = env.controller.grasp(env.objects["grasp_obj"], track_obj=True) 
+                
+#                 # TODO - replace below block with skill_wrapper's execute_skill function
+#                 for ac, skill_name in ac_generator:
+#                     try:
+#                         next_ob_dict, r, done, _ = env.step(ac)
+
+#                         # The saved observations are raw observations (not normalized) to match original dataset
+#                         traj["obs"].append(ob_dict)
+#                         traj["next_obs"].append(next_ob_dict)
+#                         traj["actions"].append(ac)
+#                         traj["rewards"].append(r)
+#                         traj["dones"].append(done) 
+
+#                         # render to screen
+#                         if render:
+#                             env.render(mode="human")
+
+#                         # compute reward
+#                         total_reward += r
+
+#                         cur_success_metrics = env.is_success()
+#                         for k in success:
+#                             success[k] = success[k] or cur_success_metrics[k]
+
+#                         # visualization - # TODO: figure out offscreen rendering in og env (implement render function in moma_wrapper)
+#                         if video_writer is not None:
+#                             if video_count % video_skip == 0:
+#                                 video_img = env.render(mode="rgb_array", height=512, width=512)
+#                                 video_writer.append_data(video_img)
+
+#                             video_count += 1
+                        
+#                         # update ob_dict
+#                         ob_dict = next_ob_dict
+#                     except:
+#                         print("skill execution failed")
+
+#                 # expert finished executing
+#                 if not success["task"]: # if expert failed, trajectory should not be stored
+#                     traj = {
+#                         "obs" : [],
+#                         "next_obs" : [],
+#                         "actions" : [],
+#                         "rewards" : [],
+#                         "dones" : [],
+#                     }
+
+#                 break
+                    
+#             ######## Case: Student is in Control ########
+#             else:
+#                 # process observations (observations used in rollout must be processed)
+#                 obs = env.process_observations(ob_dict)
+#                 ac = policy(ob=obs, goal=goal_dict)
+#                 # TODO - action from policy is normalized. unnormalize action before stepping
+#                 next_ob_dict, r, done, _ = env.step(ac)
+#                 step_i += 1
+
+#                 # render to screen
+#                 if render:
+#                     env.render(mode="human")
+
+#                 # compute reward
+#                 total_reward += r
+
+#                 cur_success_metrics = env.is_success()
+#                 for k in success:
+#                     success[k] = success[k] or cur_success_metrics[k]
+
+#                 # visualization - # TODO: figure out offscreen rendering in og env (implement render function in moma_wrapper)
+#                 if video_writer is not None:
+#                     if video_count % video_skip == 0:
+#                         video_img = env.render(mode="rgb_array", height=512, width=512)
+#                         video_writer.append_data(video_img)
+
+#                     video_count += 1
+                
+#                 # update ob_dict
+#                 ob_dict = next_ob_dict
+
+#                 # break if done
+#                 if done or (terminate_on_success and success["task"]):
+#                     break
+#         print(f"============== finished one rollout ({step_i} steps) ==============")
+
+#     except env.rollout_exceptions as e:
+#         print("WARNING: got rollout exception {}".format(e))
+#         # something went wrong. don't store trajectory
+#         traj = {
+#             "obs" : [],
+#             "next_obs" : [],
+#             "actions" : [],
+#             "rewards" : [],
+#             "dones" : [],
+#         }
+
+#     results["Return"] = total_reward
+#     results["Horizon"] = step_i + 1
+#     results["Success_Rate"] = float(success["task"])
+
+#     # log additional success metrics
+#     for k in success:
+#         if k != "task":
+#             results["{}_Success_Rate".format(k)] = float(success[k])
+
+#     # postprocess trajectory - covnert obs, actions, rewards, dones, from list of dicts to dict of array
+#     # process observations
+#     traj_len = len(traj["obs"])
+#     if traj_len > 0:
+#         processed_obs = {}
+#         processed_next_obs = {}
+#         ob_keys = [k for k in traj["obs"][0].keys()]
+#         for ob_key in ob_keys:
+#             ob = [traj["obs"][i][ob_key] for i in range(traj_len)]
+#             processed_obs[ob_key] = np.stack(ob, axis=0)
+
+#             next_ob = [traj["next_obs"][i][ob_key] for i in range(traj_len)]
+#             processed_next_obs[ob_key] = np.stack(next_ob, axis=0)
+
+#     traj["obs"] = processed_obs
+#     traj["next_obs"] = processed_next_obs
+
+#     # process actions, rewards, dones
+#     traj["actions"] = np.stack(traj["actions"], axis=0)
+#     traj["rewards"] = np.array(traj["rewards"])
+#     traj["dones"] = np.array(traj["dones"])
+
+#     return results, traj
 
 def run_rollout(
         policy, 
@@ -200,14 +411,21 @@ def run_rollout(
 
     Returns:
         results (dict): dictionary containing return, success rate, etc.
-        traj (dict): dictionary containing rollout trajectory where expert was in control. Could be empty if expert was never in control.
+
+        expert_succeeded (bool): True if rollout was successful (i.e. expert was in control and finished the task successfully)        
     """
 
-    # dummy functions for testing
-    def get_dummy_action():
-        return np.zeros(env.action_dim)
     def policy_needs_help():
-        return True
+        prob = 0.1
+        if np.random.uniform() < prob:
+            return True
+        return False
+    
+    def get_skill():
+        # dummy function that return skill action generator and skill name
+        ac_generator = env.env.controller.grasp(env.env.objects["grasp_obj"], track_obj=True) 
+        skill_name = "grasp"
+        return ac_generator, skill_name
 
     assert isinstance(policy, RolloutPolicy)
     assert isinstance(env, EnvBase) or isinstance(env, EnvWrapper)
@@ -215,83 +433,86 @@ def run_rollout(
     policy.start_episode()
 
     ob_dict = env.reset()
+    ob_dict = env.reset()
     goal_dict = None
-    if use_goals:
-        # retrieve goal from the environment
-        goal_dict = env.get_goal()
 
     results = {}
     video_count = 0  # video frame counter
 
     total_reward = 0.
+    total_steps = 0
     success = { k: False for k in env.is_success() } # success metrics
 
-    # keep track of rollout trajectories
-    traj = {
-        "obs" : [],
-        "next_obs" : [],
-        "actions" : [],
-        "rewards" : [],
-        "dones" : [],
-    }
-
     is_expert_in_control = False
+    expert_succeeded = False
 
     try:
         for step_i in range(horizon):
 
-            # TODO : Check if control should be handed to expert
-            # NOTE : for now, once expert takes control, the expert finished this episode without handing control back to student
+            # NOTE : for now, once expert takes control, the expert finishes this episode without handing control back to student
             if not is_expert_in_control and policy_needs_help(): # TODO - implement this
                 is_expert_in_control = True
-            # TODO - if uncertain, query expert for action
-            if is_expert_in_control:
-                ac = get_dummy_action() # TODO - implement this
-
-            # if not uncertain, get action from policy
-            else:
-                ac = policy(ob=ob_dict, goal=goal_dict)
-
-            # play action
-            next_ob_dict, r, done, _ = env.step(ac)
-
-            # render to screen
-            if render:
-                env.render(mode="human")
-
-            # compute reward
-            total_reward += r
-
-            cur_success_metrics = env.is_success()
-            for k in success:
-                success[k] = success[k] or cur_success_metrics[k]
-
-            # visualization
-            if video_writer is not None:
-                if video_count % video_skip == 0:
-                    video_img = env.render(mode="rgb_array", height=512, width=512)
-                    video_writer.append_data(video_img)
-
-                video_count += 1
-
-            # save this step if expert is in control
-            # NOTE : currently only saves part of trajectory when expert is in control
-            if is_expert_in_control:
-                traj["obs"].append(ob_dict)
-                traj["next_obs"].append(next_ob_dict)
-                traj["actions"] = ac
-                traj["rewards"] = r
-                traj["dones"] = done
             
-            # break if done
-            if done or (terminate_on_success and success["task"]):
+            ######## Case: Expert is in Control ########
+            # NOTE: this ignores rollout horizon and executes expert actions until success or failure
+            if is_expert_in_control:
+
+                ac_generator, skill_name = get_skill() # TODO - this is a dummy function. Implement function in environment that return correct skill action generator
+                expert_results, expert_succeeded = env.execute_skill(ac_generator, skill_name, video_writer, video_skip=video_skip)
+
+                # update results (student + expert)
+                total_steps = step_i + expert_results["Horizon"]
+                total_reward += expert_results["Return"]
+                success["task"] = expert_succeeded
+
+                # once the expert demonstration finish, end this rollout
                 break
+                    
+            ######## Case: Student is in Control ########
+            else:
+                # process observations (observations used in rollout must be processed)
+                obs = env.get_observation(ob_dict, postprocess_for_eval=True)
+                # get aciton from policy
+                ac = policy(ob=obs, goal=goal_dict)
+                # action from policy is normalized. unnormalize action before stepping
+                ac = env.denormalize_action(ac)
+                # step
+                next_ob_dict, r, done, _ = env.step(ac)
+                step_i += 1
+
+                # render to screen - TODO 
+                if render:
+                    env.render(mode="human")
+
+                # compute reward
+                total_reward += r
+
+                cur_success_metrics = env.is_success()
+                for k in success:
+                    success[k] = success[k] or cur_success_metrics[k]
+
+                # visualization - # TODO: figure out offscreen rendering in og env (implement render function in moma_wrapper)
+                if video_writer is not None:
+                    if video_count % video_skip == 0:
+                        video_img = env.render(mode="rgb_array", height=512, width=512)
+                        video_writer.append_data(video_img)
+
+                    video_count += 1
+                
+                # update ob_dict
+                ob_dict = next_ob_dict
+
+                # break if done
+                if done or (terminate_on_success and success["task"]):
+                    break
+        print(f"============== finished one rollout ({total_steps} steps) ==============")
 
     except env.rollout_exceptions as e:
         print("WARNING: got rollout exception {}".format(e))
+        # something went wrong. don't store trajectory
 
     results["Return"] = total_reward
-    results["Horizon"] = step_i + 1
+    results["Horizon"] = total_steps + 1
     results["Success_Rate"] = float(success["task"])
 
     # log additional success metrics
@@ -299,14 +520,10 @@ def run_rollout(
         if k != "task":
             results["{}_Success_Rate".format(k)] = float(success[k])
 
-    # convert trajectory to numpy arrays
-    for k in traj:
-        traj[k] = np.array(traj[k])
-
-    return results, traj
+    return results, expert_succeeded
 
 
-def rollout_with_stats_and_expert_traj(
+def rollout_with_stats(
         policy,
         envs,
         horizon,
@@ -332,6 +549,8 @@ def rollout_with_stats_and_expert_traj(
     Args:
         policy (RolloutPolicy instance): policy to use for rollouts.
 
+        hdf5_path (str): path to hdf5 dataset to add expert trajectories to
+        
         envs (dict): dictionary that maps env_name (str) to EnvBase instance. The policy will
             be rolled out in each env.
 
@@ -361,7 +580,7 @@ def rollout_with_stats_and_expert_traj(
 
         video_paths (dict): path to rollout videos for each environment
 
-        trajectories (list of dict): list of trajectories where expert was in control. Could be empty if expert was never in control.
+        n_added_traj (int): number of expert trajectories added to dataset during rollout
     """
     assert isinstance(policy, RolloutPolicy)
 
@@ -383,9 +602,7 @@ def rollout_with_stats_and_expert_traj(
         video_paths = { k : os.path.join(video_dir, "{}{}".format(k, video_str)) for k in envs }
         video_writers = { k : imageio.get_writer(video_paths[k], fps=20) for k in envs }
 
-    # trajectories to save
-    trajectories = []
-
+    n_added_traj = 0 # number of expert trajectories added to dataset
     for env_name, env in envs.items():
         env_video_writer = None
         if write_video:
@@ -402,8 +619,9 @@ def rollout_with_stats_and_expert_traj(
 
         num_success = 0
         for ep_i in iterator:
+            print(f"episode {ep_i+1} / {num_episodes}")
             rollout_timestamp = time.time()
-            rollout_info, traj = run_rollout(
+            rollout_info, rollout_suuccess = run_rollout(
                 policy=policy,
                 env=env,
                 horizon=horizon,
@@ -413,16 +631,14 @@ def rollout_with_stats_and_expert_traj(
                 video_skip=video_skip,
                 terminate_on_success=terminate_on_success,
             )
+            if rollout_suuccess:
+                n_added_traj += 1
             rollout_info["time"] = time.time() - rollout_timestamp
             rollout_logs.append(rollout_info)
             num_success += rollout_info["Success_Rate"]
             if verbose:
                 print("Episode {}, horizon={}, num_success={}".format(ep_i + 1, horizon, num_success))
                 print(json.dumps(rollout_info, sort_keys=True, indent=4))
-
-            # if expert was in control, save trajectory
-            if traj["obs"].shape[0] > 0:
-                trajectories.append(traj)
 
         if video_dir is not None:
             # close this env's video writer (next env has it's own)
@@ -438,8 +654,7 @@ def rollout_with_stats_and_expert_traj(
         # close video writer that was used for all envs
         video_writer.close()
 
-    return all_rollout_logs, video_paths, trajectories
-
+    return all_rollout_logs, video_paths, n_added_traj
 
 def should_save_from_rollout_logs(
         all_rollout_logs,
@@ -510,7 +725,6 @@ def should_save_from_rollout_logs(
         ckpt_reason=ckpt_reason,
     )
 
-
 def save_model(model, config, env_meta, shape_meta, ckpt_path, obs_normalization_stats=None):
     """
     Save model to a torch pth file.
@@ -546,7 +760,6 @@ def save_model(model, config, env_meta, shape_meta, ckpt_path, obs_normalization
         params["obs_normalization_stats"] = TensorUtils.to_list(obs_normalization_stats)
     torch.save(params, ckpt_path)
     print("save checkpoint to {}".format(ckpt_path))
-
 
 def run_epoch(model, data_loader, epoch, validate=False, num_steps=None, obs_normalization_stats=None):
     """
@@ -633,8 +846,6 @@ def run_epoch(model, data_loader, epoch, validate=False, num_steps=None, obs_nor
 
     return step_log_all
 
-
-
 def is_every_n_steps(interval, current_step, skip_zero=False):
     """
     Convenient function to check whether current_step is at the interval. 
@@ -655,3 +866,89 @@ def is_every_n_steps(interval, current_step, skip_zero=False):
     if skip_zero and current_step == 0:
         return False
     return current_step % interval == 0
+
+def initialize_dataloaders(config, shape_meta):
+    """
+    Returns training and validation data loaders.
+    Modularized since MP-DAgger updates datafile during rollout and Dataloaders must be reinitialized
+
+    Returns:
+        train_loader (DataLoader instance): data loader for training dataset
+
+        valid_loader (DataLoader instance): data loader for validation dataset
+
+        obs_normalization_stats (dict or None): if provided, this should map observation keys to dicts
+            with a "mean" and "std" of shape (1, ...) where ... is the default
+            shape for the observation.
+    """
+    # load training data
+    trainset, validset = load_data_for_training(
+        config, obs_keys=shape_meta["all_obs_keys"])
+    train_sampler = trainset.get_dataset_sampler()
+    print("\n============= Training Dataset =============")
+    print(trainset)
+    print("")
+    if validset is not None:
+        print("\n============= Validation Dataset =============")
+        print(validset)
+        print("")
+
+    # maybe retreve statistics for normalizing observations
+    obs_normalization_stats = None
+    if config.train.hdf5_normalize_obs:
+        obs_normalization_stats = trainset.get_obs_normalization_stats()
+        raise Warning("normalize obs is not recommended")
+
+    # initialize data loaders
+    train_loader = DataLoader(
+        dataset=trainset,
+        sampler=train_sampler,
+        batch_size=config.train.batch_size,
+        shuffle=(train_sampler is None),
+        num_workers=config.train.num_data_workers,
+        drop_last=True
+    )
+
+    if config.experiment.validate:
+        # cap num workers for validation dataset at 1
+        num_workers = min(config.train.num_data_workers, 1)
+        valid_sampler = validset.get_dataset_sampler()
+        valid_loader = DataLoader(
+            dataset=validset,
+            sampler=valid_sampler,
+            batch_size=config.train.batch_size,
+            shuffle=(valid_sampler is None),
+            num_workers=num_workers,
+            drop_last=True
+        )
+    else:
+        valid_loader = None
+
+    return train_loader, valid_loader, obs_normalization_stats
+
+# def aggregate_dataset(hdf5_path, trajectories):
+#     """
+#     Adds trajectories to hdf5 file
+#     """
+#     if isinstance(trajectories, dict):
+#         trajectories = [trajectories]
+#     assert isinstance(trajectories, list)
+
+#     with h5py.File(hdf5_path, "r+") as f:
+#         data_grp = f.require_group("data")
+#         n_traj = len(data_grp.keys())
+#         for i, traj in enumerate(trajectories):
+#             traj_grp = data_grp.create_group(f"traj_{n_traj + i}")
+#             traj_grp.attrs["num_samples"] = traj["rewards"].shape[0]
+
+#             # add observations
+#             obs_grp = traj_grp.create_group("obs")
+#             next_obs_grp = traj_grp.create_group("next_obs")
+#             for key in traj["obs"]:
+#                 obs_grp.create_dataset(key, data=traj["obs"][key])
+#                 next_obs_grp.create_dataset(key, data=traj["next_obs"][key])
+
+#             # add actions, rewards, dones
+#             traj_grp.create_dataset("actions", data=traj["actions"])
+#             traj_grp.create_dataset("rewards", data=traj["rewards"])
+#             traj_grp.create_dataset("dones", data=traj["dones"])
