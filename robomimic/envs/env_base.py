@@ -14,7 +14,7 @@ class EnvType:
     ROBOSUITE_TYPE = 1
     GYM_TYPE = 2
     IG_MOMART_TYPE = 3
-    OMNIMIMIC_TYPE = 4
+    OG_DISTILLING_MOMA_TYPE = 4
 
 
 class EnvBase(abc.ABC):

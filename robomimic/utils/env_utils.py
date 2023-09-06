@@ -42,11 +42,11 @@ def get_env_class(env_meta=None, env_type=None, env=None):
         from robomimic.envs.env_ig_momart import EnvGibsonMOMART
         return EnvGibsonMOMART
     elif env_type == EB.EnvType.OG_DISTILLING_MOMA_TYPE:
-        # TODO - need to clean this up to make it more general
-        import sys
-        sys.path.append("/home/svl/distilling-moma")
-        from envs.nav_pick_env import NavPickEnv
-        return NavPickEnv
+        # from omnimimic.envs.skill_rollout_wrapper import OmnimimicSkillRolloutWrapper
+        # return OmnimimicSkillRolloutWrapper
+        from distilling_moma.utils.env_utils import get_distilling_moma_env_class
+        return get_distilling_moma_env_class(env_name=env_meta["env_name"])
+
     raise Exception("code should never reach this point")
 
 
@@ -169,9 +169,9 @@ def create_env(
             on every env.step call. Set this to False for efficiency reasons, if image
             observations are not required.
     """
-
     # note: pass @postprocess_visual_obs True, to make sure images are processed for network inputs
     env_class = get_env_class(env_type=env_type)
+
     env = env_class(
         env_name=env_name, 
         render=render, 
@@ -220,18 +220,20 @@ def create_env_from_metadata(
         env_name = env_meta["env_name"]
     env_type = get_env_type(env_meta=env_meta)
     env_kwargs = env_meta["env_kwargs"]
+    env_class = get_env_class(env_meta=env_meta)
 
-    env = create_env(
-        env_type=env_type,
-        env_name=env_name,  
+    env = env_class(
+        env_name=env_name, 
         render=render, 
         render_offscreen=render_offscreen, 
-        use_image_obs=use_image_obs, 
+        use_image_obs=use_image_obs,
+        postprocess_visual_obs=True,
         **env_kwargs,
     )
-    # check_env_version(env, env_meta)
-    return env
 
+    print("Created environment with name {}".format(env_name))
+    print("Action size is {}".format(env.action_dimension))
+    return env
 
 def create_env_for_data_processing(
     env_meta,
@@ -285,7 +287,7 @@ def create_env_for_data_processing(
     return env
 
 
-def wrap_env_from_config(env, config):
+def wrap_env_from_config(env, config, env_meta, dataset_path):
     """
     Wraps environment using the provided Config object to determine which wrappers
     to use (if any).
@@ -294,4 +296,18 @@ def wrap_env_from_config(env, config):
         from robomimic.envs.wrappers import FrameStackWrapper
         env = FrameStackWrapper(env, num_frames=config.train.frame_stack)
 
+    # get env type
+    env_type = get_env_type(env_meta=env_meta)
+    if env_type == EB.EnvType.OG_DISTILLING_MOMA_TYPE:
+        from omnimimic.envs.skill_rollout_wrapper import OmnimimicSkillRolloutWrapper
+        obs_modalities = []
+        modality_dict = config["observation"]["modalities"]["obs"]
+        for modality in modality_dict.values():
+            obs_modalities += modality
+        env = OmnimimicSkillRolloutWrapper(
+            env=env,
+            obs_modalities=obs_modalities,
+            path=dataset_path,
+        )
+    # if env is distilling moma type, get obs_modalities from config and wrap it in omnimimic wrapper
     return env

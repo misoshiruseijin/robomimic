@@ -105,27 +105,25 @@ def train_mpdagger(config, device):
             for name in config.experiment.additional_envs:
                 env_names.append(name)
 
-        sys.path.append("../")
-        sys.path.append("../distilling-moma")
-        from Omnimimic.envs.skill_rollout_wrapper import OmnimimicSkillRolloutWrapper
-        from envs.nav_pick_env import NavPickEnv
+        # from omnimimic.envs.skill_rollout_wrapper import OmnimimicSkillRolloutWrapper
+        # from distilling_moma.envs.nav_pick_env import NavPickEnv
         for env_name in env_names:
-            env = OmnimimicSkillRolloutWrapper(
-                env=NavPickEnv(
-                    **env_meta["env_kwargs"]
-                ),
-                obs_modalities=["proprio", "rgb", "depth", "rgb_wrist", "depth_wrist", "scan"],
-                path=aggr_dataset_path,
-            )
-            # TODO - above is for testing. change to use below
-            # env = EnvUtils.create_env_from_metadata(
-            #     env_meta=env_meta,
-            #     env_name=env_name,
-            #     render=False, 
-            #     render_offscreen=config.experiment.render_video,
-            #     use_image_obs=shape_meta["use_images"], 
+            # env = OmnimimicSkillRolloutWrapper(
+            #     env=NavPickEnv(
+            #         **env_meta["env_kwargs"]
+            #     ),
+            #     obs_modalities=["proprio", "rgb", "depth", "rgb_wrist", "depth_wrist", "scan"],
+            #     path=aggr_dataset_path,
             # )
-            # env = EnvUtils.wrap_env_from_config(env, config=config) # apply environment warpper, if applicable
+            # TODO - above is for testing. change to use below
+            env = EnvUtils.create_env_from_metadata(
+                env_meta=env_meta,
+                env_name=env_name,
+                render=False, 
+                render_offscreen=config.experiment.render_video,
+                use_image_obs=shape_meta["use_images"], 
+            )
+            env = EnvUtils.wrap_env_from_config(env, config=config, env_meta=env_meta, dataset_path=aggr_dataset_path) # apply environment warpper, if applicable
             envs[env.name] = env
             print(envs[env.name])
 
