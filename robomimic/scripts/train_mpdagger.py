@@ -34,7 +34,7 @@ import torch
 from torch.utils.data import DataLoader
 
 import robomimic
-import robomimic.utils.mpdagger_train_utils as TrainUtils
+import robomimic.utils.distilling_moma_utils as TrainUtils
 import robomimic.utils.torch_utils as TorchUtils
 import robomimic.utils.obs_utils as ObsUtils
 import robomimic.utils.env_utils as EnvUtils
@@ -43,136 +43,110 @@ from robomimic.config import config_factory
 from robomimic.algo import algo_factory, RolloutPolicy
 from robomimic.utils.log_utils import PrintLogger, DataLogger, flush_warnings
 
+def rollout_and_aggregate(
+    config, 
+    model,
+    envs,
+    video_dir,
+    epoch,
+    data_logger,
+    obs_normalization_stats,
+    train_loader,
+    valid_loader,
+    unc_data_path,
+    best_return,
+    best_success_rate,
+):
+    # do rollouts at fixed rate or if it's time to save a new ckpt
+    video_paths = None
 
-def train_mpdagger(config, device):
-    """
-    Train a model using the algorithm.
-    """
+    # wrap model as a RolloutPolicy to prepare for rollouts
+    rollout_model = RolloutPolicy(model, obs_normalization_stats=obs_normalization_stats)
 
-    # first set seeds
-    np.random.seed(config.train.seed)
-    torch.manual_seed(config.train.seed)
+    num_episodes = config.experiment.rollout.n
 
-    torch.set_num_threads(2)
+    # Close hdf5 file before rollouts
+    train_loader.dataset.close_and_delete_hdf5_handle()
+    if valid_loader is not None:
+        valid_loader.dataset.close_and_delete_hdf5_handle()
 
-    print("\n============= New Training Run with Config =============")
-    print(config)
-    print("")
-    log_dir, ckpt_dir, video_dir = TrainUtils.get_exp_dir(config)
+    # Datafile gets aggregated here
+    all_rollout_logs, video_paths, n_added_il_traj, n_added_unc_traj = TrainUtils.rollout_with_stats(
+        policy=rollout_model,
+        envs=envs,
+        horizon=config.experiment.rollout.horizon,
+        use_goals=config.use_goals,
+        num_episodes=num_episodes,
+        render=False,
+        video_dir=video_dir if config.experiment.render_video else None, # TODO rendering is not supported yet - implement it in moma_wrapper
+        epoch=epoch,
+        video_skip=config.experiment.get("video_skip", 5),
+        terminate_on_success=config.experiment.rollout.terminate_on_success,
+        uncertainty_data_path=unc_data_path,
+    )
 
-    if config.experiment.logging.terminal_output_to_txt:
-        # log stdout and stderr to a text file
-        logger = PrintLogger(os.path.join(log_dir, 'log.txt'))
-        sys.stdout = logger
-        sys.stderr = logger
+    # summarize results from rollouts to tensorboard and terminal
+    for env_name in all_rollout_logs:
+        rollout_logs = all_rollout_logs[env_name]
+        for k, v in rollout_logs.items():
+            if k.startswith("Time_"):
+                data_logger.record("Timing_Stats/Rollout_{}_{}".format(env_name, k[5:]), v, epoch)
+            else:
+                data_logger.record("Rollout/{}/{}".format(k, env_name), v, epoch, log_stats=True)
 
-    # read config to set up metadata for observation modalities (e.g. detecting rgb observations)
-    ObsUtils.initialize_obs_utils_with_config(config)
-
-    # make sure the dataset exists
-    dataset_path = os.path.expanduser(config.train.data)
-    if not os.path.exists(dataset_path):
-        raise Exception("Dataset at provided path {} not found!".format(dataset_path))
+        print("\nEpoch {} Rollouts took {}s (avg) with results:".format(epoch, rollout_logs["time"]))
+        print('Env: {}'.format(env_name))
+        print(json.dumps(rollout_logs, sort_keys=True, indent=4))
     
-    # Since training aggregates the datafile, make a copy of dataset and aggreate on the copy to avoid overwriting the original file
-    print("Making a copy of the dataset. This may take a while...")
-    original_dataset_path = dataset_path
-    aggr_dataset_path = dataset_path.split(".")[0] + "_aggr.hdf5"
-    shutil.copy2(src=original_dataset_path, dst=aggr_dataset_path) # TODO - uncomment this
-    print(f"Done making a copy of the dataset. Aggregated dataset will be saved at {aggr_dataset_path}")
-    # overwrite config with new dataset path
-    config.train.data = aggr_dataset_path
+    epoch_ckpt_name = "model_epoch_{}".format(epoch)
 
-    # load basic metadata from training file
-    print("\n============= Loaded Environment Metadata =============")
-    env_meta = FileUtils.get_env_metadata_from_dataset(dataset_path=config.train.data)
-    shape_meta = FileUtils.get_shape_metadata_from_dataset(
-        dataset_path=config.train.data,
-        all_obs_keys=config.all_obs_keys,
-        verbose=True
+    # checkpoint and video saving logic
+    updated_stats = TrainUtils.should_save_from_rollout_logs(
+        all_rollout_logs=all_rollout_logs,
+        best_return=best_return,
+        best_success_rate=best_success_rate,
+        epoch_ckpt_name=epoch_ckpt_name,
+        save_on_best_rollout_return=config.experiment.save.on_best_rollout_return,
+        save_on_best_rollout_success_rate=config.experiment.save.on_best_rollout_success_rate,
     )
+    best_return = updated_stats["best_return"]
+    best_success_rate = updated_stats["best_success_rate"]
+    epoch_ckpt_name = updated_stats["epoch_ckpt_name"]
+    should_save_ckpt = (config.experiment.save.enabled and updated_stats["should_save_ckpt"]) or should_save_ckpt
+    if updated_stats["ckpt_reason"] is not None:
+        ckpt_reason = updated_stats["ckpt_reason"]
 
-    if config.experiment.env is not None:
-        env_meta["env_name"] = config.experiment.env
-        print("=" * 30 + "\n" + "Replacing Env to {}\n".format(env_meta["env_name"]) + "=" * 30)
-
-    # create environment
-    envs = OrderedDict()
-    if config.experiment.rollout.enabled:
-        # create environments for validation runs
-        env_names = [env_meta["env_name"]]
-        if config.experiment.additional_envs is not None:
-            for name in config.experiment.additional_envs:
-                env_names.append(name)
-
-        # from omnimimic.envs.skill_rollout_wrapper import OmnimimicSkillRolloutWrapper
-        # from distilling_moma.envs.nav_pick_env import NavPickEnv
-        for env_name in env_names:
-            # env = OmnimimicSkillRolloutWrapper(
-            #     env=NavPickEnv(
-            #         **env_meta["env_kwargs"]
-            #     ),
-            #     obs_modalities=["proprio", "rgb", "depth", "rgb_wrist", "depth_wrist", "scan"],
-            #     path=aggr_dataset_path,
-            # )
-            # TODO - above is for testing. change to use below
-            env = EnvUtils.create_env_from_metadata(
-                env_meta=env_meta,
-                env_name=env_name,
-                render=False, 
-                render_offscreen=config.experiment.render_video,
-                use_image_obs=shape_meta["use_images"], 
-            )
-            env = EnvUtils.wrap_env_from_config(env, config=config, env_meta=env_meta, dataset_path=aggr_dataset_path) # apply environment warpper, if applicable
-            envs[env.name] = env
-            print(envs[env.name])
-
-    print("")
-
-    # setup for a new training run
-    data_logger = DataLogger(
-        log_dir,
-        config,
-        log_tb=config.experiment.logging.log_tb,
-        log_wandb=config.experiment.logging.log_wandb,
-    )
-    model = algo_factory(
-        algo_name=config.algo_name,
-        config=config,
-        obs_key_shapes=shape_meta["all_shapes"],
-        ac_dim=shape_meta["ac_dim"],
-        device=device,
-    )
+    # Only keep saved videos if the ckpt should be saved (but not because of validation score)
+    should_save_video = (should_save_ckpt and (ckpt_reason != "valid")) or config.experiment.keep_all_videos
+    if video_paths is not None and not should_save_video:
+        for env_name in video_paths:
+            os.remove(video_paths[env_name])
     
-    # save the config as a json file
-    with open(os.path.join(log_dir, '..', 'config.json'), 'w') as outfile:
-        json.dump(config, outfile, indent=4)
+    return n_added_il_traj, n_added_unc_traj, best_return, best_success_rate
 
-    print("\n============= Model Summary =============")
-    print(model)  # print model summary
-    print("")
+def train_loop(
+    config,
+    model, data_logger, train_loader, valid_loader,
+    obs_normalization_stats,
+    env_meta, shape_meta, ckpt_dir,
+    best_valid_loss, last_ckpt_time, epochs_so_far,
+):
+    """
+    Main training loop
 
-    # Initialize dataloaders
-    train_loader, valid_loader, obs_normalization_stats = TrainUtils.initialize_dataloaders(config=config, shape_meta=shape_meta)
-
-    # print all warnings before training begins
-    print("*" * 50)
-    print("Warnings generated by robomimic have been duplicated here (from above) for convenience. Please check them carefully.")
-    flush_warnings()
-    print("*" * 50)
-    print("")
-
-    # main training loop
-    best_valid_loss = None
-    best_return = {k: -np.inf for k in envs} if config.experiment.rollout.enabled else None
-    best_success_rate = {k: -1. for k in envs} if config.experiment.rollout.enabled else None
-    last_ckpt_time = time.time()
+    Args:
+        config (dict): config dictionary
+        model (Algo): model to train
+        data_logger (DataLogger): data logger for logging training stats
+        train_infos (dict): dictionary containing `best_valid_loss`, `best_return`, `best_success_rate`, and `last_ckpt_time`
+        epochs_so_far (int): total number of epochs this model has been trained for
+    """
 
     # number of learning steps per epoch (defaults to a full dataset pass)
     train_num_steps = config.experiment.epoch_every_n_steps
     valid_num_steps = config.experiment.validation_epoch_every_n_steps
 
-    for epoch in range(1, config.train.num_epochs + 1): # epoch numbers start at 1
+    for epoch in range(epochs_so_far + 1, epochs_so_far + config.train.num_epochs_per_loop + 1): # epoch numbers start at 1
         step_log = TrainUtils.run_epoch(
             model=model,
             data_loader=train_loader,
@@ -229,78 +203,6 @@ def train_mpdagger(config, device):
                     should_save_ckpt = True
                     ckpt_reason = "valid" if ckpt_reason is None else ckpt_reason
 
-        # Evaluate the model by by running rollouts - TODO - modify rollout for MP-DAgger
-
-        # do rollouts at fixed rate or if it's time to save a new ckpt
-        video_paths = None
-        rollout_check = (epoch % config.experiment.rollout.rate == 0) or (should_save_ckpt and ckpt_reason == "time")
-        if config.experiment.rollout.enabled and (epoch > config.experiment.rollout.warmstart) and rollout_check:
-
-            # wrap model as a RolloutPolicy to prepare for rollouts
-            rollout_model = RolloutPolicy(model, obs_normalization_stats=obs_normalization_stats)
-
-            num_episodes = config.experiment.rollout.n
-
-            # Close hdf5 file before rollouts
-            train_loader.dataset.close_and_delete_hdf5_handle()
-            if valid_loader is not None:
-                valid_loader.dataset.close_and_delete_hdf5_handle()
-
-            # Datafile gets aggregated here
-            all_rollout_logs, video_paths, n_added_traj = TrainUtils.rollout_with_stats(
-                policy=rollout_model,
-                envs=envs,
-                horizon=config.experiment.rollout.horizon,
-                use_goals=config.use_goals,
-                num_episodes=num_episodes,
-                render=False,
-                video_dir=video_dir if config.experiment.render_video else None, # TODO rendering is not supported yet - implement it in moma_wrapper
-                epoch=epoch,
-                video_skip=config.experiment.get("video_skip", 5),
-                terminate_on_success=config.experiment.rollout.terminate_on_success,
-            )
-
-            # TODO
-            # if trajectories were added to dataset, reinitialize Dataset and DataLoader using updated hdf5 file
-            if n_added_traj > 0:
-                print(f"\n Added {n_added_traj} expert trajectories to dataset. Reinitializing dataloaders with updated datafile")
-                train_loader, valid_loader, obs_normalization_stats = TrainUtils.initialize_dataloaders(config=config, shape_meta=shape_meta)
-
-            # summarize results from rollouts to tensorboard and terminal
-            for env_name in all_rollout_logs:
-                rollout_logs = all_rollout_logs[env_name]
-                for k, v in rollout_logs.items():
-                    if k.startswith("Time_"):
-                        data_logger.record("Timing_Stats/Rollout_{}_{}".format(env_name, k[5:]), v, epoch)
-                    else:
-                        data_logger.record("Rollout/{}/{}".format(k, env_name), v, epoch, log_stats=True)
-
-                print("\nEpoch {} Rollouts took {}s (avg) with results:".format(epoch, rollout_logs["time"]))
-                print('Env: {}'.format(env_name))
-                print(json.dumps(rollout_logs, sort_keys=True, indent=4))
-
-            # checkpoint and video saving logic
-            updated_stats = TrainUtils.should_save_from_rollout_logs(
-                all_rollout_logs=all_rollout_logs,
-                best_return=best_return,
-                best_success_rate=best_success_rate,
-                epoch_ckpt_name=epoch_ckpt_name,
-                save_on_best_rollout_return=config.experiment.save.on_best_rollout_return,
-                save_on_best_rollout_success_rate=config.experiment.save.on_best_rollout_success_rate,
-            )
-            best_return = updated_stats["best_return"]
-            best_success_rate = updated_stats["best_success_rate"]
-            epoch_ckpt_name = updated_stats["epoch_ckpt_name"]
-            should_save_ckpt = (config.experiment.save.enabled and updated_stats["should_save_ckpt"]) or should_save_ckpt
-            if updated_stats["ckpt_reason"] is not None:
-                ckpt_reason = updated_stats["ckpt_reason"]
-
-        # Only keep saved videos if the ckpt should be saved (but not because of validation score)
-        should_save_video = (should_save_ckpt and (ckpt_reason != "valid")) or config.experiment.keep_all_videos
-        if video_paths is not None and not should_save_video:
-            for env_name in video_paths:
-                os.remove(video_paths[env_name])
-
         # Save model checkpoints based on conditions (success rate, validation loss, etc)
         if should_save_ckpt:
             TrainUtils.save_model(
@@ -319,93 +221,358 @@ def train_mpdagger(config, device):
         print("\nEpoch {} Memory Usage: {} MB\n".format(epoch, mem_usage))
 
     # terminate logging
-    data_logger.close()
+    # data_logger.close()
 
+    return best_valid_loss, last_ckpt_time, epoch
+
+def prepare_for_training(config, log_dir, shape_meta, device):
+    """
+    Creates data logger, model, saves config to log-dir, and set up dataloaders
+    """
+    data_logger = DataLogger(
+        log_dir,
+        config,
+        log_tb=config.experiment.logging.log_tb,
+        log_wandb=config.experiment.logging.log_wandb,
+    )
+
+    # TODO - allow option for loading pretrained model
+    model = algo_factory(
+        algo_name=config.algo_name,
+        config=config,
+        obs_key_shapes=shape_meta["all_shapes"],
+        ac_dim=shape_meta["ac_dim"],
+        device=device,
+    )
+
+    with open(os.path.join(log_dir, '..', 'config.json'), 'w') as outfile:
+        json.dump(config, outfile, indent=4)
+
+    train_loader, valid_loader, obs_normalization_stats = TrainUtils.initialize_dataloaders(config=config, shape_meta=shape_meta)
+    
+    print("\n============= Model Summary =============")
+    print(model)  # print model summary
+    print("")
+    
+    return data_logger, model, train_loader, valid_loader, obs_normalization_stats
+
+def train_mpdagger(il_config, unc_config, il_device, unc_device, il_model_ckpt=None, unc_model_ckpt=None):
+    # TODO - add option to load models from ckpt
+    """
+    Train a motion planner dagger with uncertainty estimation 
+    """
+
+    # first set seeds
+    np.random.seed(il_config.train.seed)
+    torch.manual_seed(il_config.train.seed)
+
+    torch.set_num_threads(2)
+
+    print("\n============= New Training Run with Config =============")
+    print(il_config)
+    print("")
+
+    # get logging directories
+    il_log_dir, il_ckpt_dir, il_video_dir = TrainUtils.get_exp_dir(il_config) 
+    unc_log_dir, unc_ckpt_dir, unc_video_dir = TrainUtils.get_exp_dir(unc_config)
+
+    if il_config.experiment.logging.terminal_output_to_txt:
+        # log stdout and stderr to a text file
+        logger = PrintLogger(os.path.join(il_log_dir, 'log.txt'))
+        sys.stdout = logger
+        sys.stderr = logger
+
+    # read config to set up metadata for observation modalities (e.g. detecting rgb observations)
+    ObsUtils.initialize_obs_utils_with_config(il_config)
+
+
+    """
+    DATA PREPARATION
+        - confirm that dataset exists
+        - create copy of dataset to aggregate (for IL policy)
+        - create new dataset for uncertainty estimation model by copying relevant data    
+    """
+    # make sure IL dataset exists
+    dataset_path = os.path.expanduser(il_config.train.data)
+    if not os.path.exists(dataset_path):
+        raise Exception("Dataset at provided path {} not found!".format(dataset_path))
+    
+    # Since training aggregates the datafile, make a copy of dataset and aggreate on the copy to avoid overwriting the original file
+    print("Making a copy of the dataset. This may take a while...")
+    original_dataset_path = dataset_path
+    student_aggr_dataset_path = dataset_path.split(".")[0] + "_aggr.hdf5"
+    shutil.copy2(src=original_dataset_path, dst=student_aggr_dataset_path) # TODO - uncomment this
+    print(f"Done making a copy of the dataset. Aggregated dataset will be saved at {student_aggr_dataset_path}")
+    
+    # overwrite config with new dataset path
+    il_config.train.data = student_aggr_dataset_path
+    
+    # create new dataset for uncertainty estimation model
+    # TODO - get model type in a proper way
+    unc_dataset_path = TrainUtils.create_uncertainty_detector_dataset(dataset_path, "vae")
+    unc_config.train.data = unc_dataset_path
+
+    
+    """
+    ENVIRONMENT AND METADATA PREPARATION
+        - load env metadata from IL dataset
+        - load shape metadata for each dataset
+        - create environment from IL config
+        - initialize datalogger, dataloader, and model for IL and uncertainty estimation model
+    """
+    # load env metadata from IL dataset
+    print("\n============= Loaded Environment Metadata =============")
+    env_meta = FileUtils.get_env_metadata_from_dataset(dataset_path=il_config.train.data)
+    
+    # load shape metadata for each dataset
+    il_shape_meta = FileUtils.get_shape_metadata_from_dataset(
+        dataset_path=il_config.train.data,
+        all_obs_keys=il_config.all_obs_keys,
+        verbose=True
+    )
+    unc_shape_meta = FileUtils.get_shape_metadata_from_dataset(
+        dataset_path=unc_config.train.data,
+        all_obs_keys=unc_config.all_obs_keys,
+        verbose=True
+    )
+
+    if il_config.experiment.env is not None:
+        env_meta["env_name"] = il_config.experiment.env
+        print("=" * 30 + "\n" + "Replacing Env to {}\n".format(env_meta["env_name"]) + "=" * 30)
+
+    # create environment from IL config
+    envs = OrderedDict()
+    if il_config.experiment.rollout.enabled:
+        # create environments for validation runs
+        env_names = [env_meta["env_name"]]
+        if il_config.experiment.additional_envs is not None:
+            for name in il_config.experiment.additional_envs:
+                env_names.append(name)
+
+        for env_name in env_names:
+            env = EnvUtils.create_env_from_metadata(
+                env_meta=env_meta,
+                env_name=env_name,
+                render=False, 
+                render_offscreen=il_config.experiment.render_video,
+                use_image_obs=il_shape_meta["use_images"], 
+            )
+            env = EnvUtils.wrap_env_from_config(env, config=il_config, env_meta=env_meta, dataset_path=student_aggr_dataset_path) # apply environment warpper, if applicable
+            envs[env.name] = env
+            print(envs[env.name])
+
+    print("")
+
+    il_data_logger, il_model, il_train_loader, il_valid_loader, il_obs_normalization_stats = \
+        prepare_for_training(il_config, il_log_dir, il_shape_meta, il_device, )
+    
+    unc_data_logger, unc_model, unc_train_loader, unc_valid_loader, unc_obs_normalization_stats = \
+        prepare_for_training(unc_config, unc_log_dir, unc_shape_meta, unc_device, )
+    
+    # print all warnings before training begins
+    print("*" * 50)
+    print("Warnings generated by robomimic have been duplicated here (from above) for convenience. Please check them carefully.")
+    flush_warnings()
+    print("*" * 50)
+    print("")
+
+
+    """
+    MAIN TRAINING LOOP
+        - train uncertainty estimation model
+        - train IL model
+        - rollout policy and aggregate datasets
+        - repeat
+    """
+    # main training loop
+    il_best_valid_loss = None
+    il_best_return = {k: -np.inf for k in envs} if il_config.experiment.rollout.enabled else None
+    il_best_success_rate = {k: -1. for k in envs} if il_config.experiment.rollout.enabled else None
+    il_last_ckpt_time = time.time()
+    unc_best_valid_loss = None
+    unc_best_return = {k: -np.inf for k in envs} if il_config.experiment.rollout.enabled else None
+    unc_best_success_rate = {k: -1. for k in envs} if il_config.experiment.rollout.enabled else None
+    unc_last_ckpt_time = time.time()
+
+    # number of epochs each model has been trained so far
+    il_epochs_so_far = 0
+    unc_epochs_so_far = 0
+
+    done_training = (il_epochs_so_far >= il_config.train.num_epochs) and (unc_epochs_so_far >= unc_config.train.num_epochs)
+    phases = ["unc", "il"]
+    training_phase = 0 # start with training uncertainty estimation model
+    should_train_unc = True
+
+    while not done_training:
+        phase = phases[training_phase]
+        if phase == "unc" and should_train_unc:
+            print("TRAINING UNCERTAINTY MODEL")
+            # train the uncertainty estimation model
+            unc_best_valid_loss, unc_last_ckpt_time, unc_epochs_so_far = train_loop(
+                config=unc_config,
+                model=unc_model,
+                data_logger=unc_data_logger,
+                train_loader=unc_train_loader,
+                valid_loader=unc_valid_loader,
+                obs_normalization_stats=unc_obs_normalization_stats,
+                env_meta=env_meta,
+                shape_meta=unc_shape_meta,
+                ckpt_dir=unc_ckpt_dir,
+                best_valid_loss=unc_best_valid_loss,
+                last_ckpt_time=unc_last_ckpt_time,
+                epochs_so_far=unc_epochs_so_far,
+            )
+
+        elif phase == "il":
+            print("TRAINING IL MODEL")
+            # train IL model
+            il_best_valid_loss, il_last_ckpt_time, il_epochs_so_far = train_loop(
+                config=il_config,
+                model=il_model,
+                data_logger=il_data_logger,
+                train_loader=il_train_loader,
+                valid_loader=il_valid_loader,
+                obs_normalization_stats=il_obs_normalization_stats,
+                env_meta=env_meta,
+                shape_meta=il_shape_meta,
+                ckpt_dir=il_ckpt_dir,
+                best_valid_loss=il_best_valid_loss,
+                last_ckpt_time=il_last_ckpt_time,
+                epochs_so_far=il_epochs_so_far,
+            )
+
+            # rollout policy
+            n_added_il_traj, n_added_unc_traj, il_best_return, il_best_success_rate = rollout_and_aggregate(
+                config=il_config,
+                model=il_model,
+                envs=envs,
+                video_dir=il_video_dir,
+                epoch=il_epochs_so_far,
+                data_logger=il_data_logger,
+                obs_normalization_stats=il_obs_normalization_stats,
+                train_loader=il_train_loader,
+                valid_loader=il_valid_loader,
+                unc_data_path=unc_dataset_path,
+                best_return=il_best_return,
+                best_success_rate=il_best_success_rate,
+            )
+
+            print(f"Added {n_added_il_traj} IL traj and {n_added_unc_traj} uncertainty traj to dataset")
+            # if trajectories were added to dataset, reinitialize Dataset and DataLoader using updated hdf5 file
+            if n_added_il_traj > 0:
+                print(f"\n Added {n_added_il_traj} expert trajectories to IL dataset. Reinitializing dataloaders with updated datafile")
+                il_train_loader, il_valid_loader, il_obs_normalization_stats = \
+                    TrainUtils.initialize_dataloaders(config=il_config, shape_meta=il_shape_meta)
+            if n_added_unc_traj > 0:
+                print(f"\n Added {n_added_unc_traj} successful trajectories to uncertainty estimation dataset. Reinitializing dataloaders with updated datafile")
+                unc_train_loader, unc_valid_loader, unc_obs_normalization_stats = \
+                    TrainUtils.initialize_dataloaders(config=unc_config, shape_meta=unc_shape_meta)
+
+            should_train_unc = n_added_unc_traj > 0
+    
+        done_training = (il_epochs_so_far >= il_config.train.num_epochs)\
+            and (unc_epochs_so_far >= unc_config.train.num_epochs)
+        training_phase = (training_phase + 1) % len(phases)
+
+    # terminate logging
+    il_data_logger.close()
+    unc_data_logger.close()
 
 def main(args):
 
-    if args.config is not None:
-        ext_cfg = json.load(open(args.config, 'r'))
-        config = config_factory(ext_cfg["algo_name"])
-        # update config with external json - this will throw errors if
-        # the external config has keys not present in the base algo config
-        with config.values_unlocked():
-            config.update(ext_cfg)
-    else:
-        config = config_factory(args.algo)
 
-    if args.dataset is not None:
-        config.train.data = args.dataset
+    # if args.config is not None:
+    #     ext_cfg = json.load(open(args.config, 'r'))
+    #     config = config_factory(ext_cfg["algo_name"])
+    #     # update config with external json - this will throw errors if
+    #     # the external config has keys not present in the base algo config
+    #     with config.values_unlocked():
+    #         config.update(ext_cfg)
+    # else:
+    #     config = config_factory(args.algo)
 
-    if args.name is not None:
-        config.experiment.name = args.name
+    # if args.dataset is not None:
+    #     config.train.data = args.dataset
+
+    # if args.name is not None:
+    #     config.experiment.name = args.name
+
 
     # get torch device
-    device = TorchUtils.get_torch_device(try_to_use_cuda=config.train.cuda)
+    # device = TorchUtils.get_torch_device(try_to_use_cuda=config.train.cuda)
 
-    # maybe modify config for debugging purposes
-    if args.debug:
-        # shrink length of training to test whether this run is likely to crash
-        config.unlock()
-        config.lock_keys()
+    # # maybe modify config for debugging purposes
+    # if args.debug:
+    #     # shrink length of training to test whether this run is likely to crash
+    #     config.unlock()
+    #     config.lock_keys()
 
-        # train and validate (if enabled) for 3 gradient steps, for 2 epochs
-        config.experiment.epoch_every_n_steps = 3
-        config.experiment.validation_epoch_every_n_steps = 3
-        config.train.num_epochs = 2
+    #     # train and validate (if enabled) for 3 gradient steps, for 2 epochs
+    #     config.experiment.epoch_every_n_steps = 3
+    #     config.experiment.validation_epoch_every_n_steps = 3
+    #     config.train.num_epochs = 2
 
-        # if rollouts are enabled, try 2 rollouts at end of each epoch, with 10 environment steps
-        config.experiment.rollout.rate = 1
-        config.experiment.rollout.n = 2
-        config.experiment.rollout.horizon = 10
+    #     # if rollouts are enabled, try 2 rollouts at end of each epoch, with 10 environment steps
+    #     config.experiment.rollout.rate = 1
+    #     config.experiment.rollout.n = 2
+    #     config.experiment.rollout.horizon = 10
 
-        # send output to a temporary directory
-        config.train.output_dir = "/tmp/tmp_trained_models"
+    #     # send output to a temporary directory
+    #     config.train.output_dir = "/tmp/tmp_trained_models"
 
-    # lock config to prevent further modifications and ensure missing keys raise errors
-    config.lock()
+    # # lock config to prevent further modifications and ensure missing keys raise errors
+    # config.lock()
 
-    # catch error during training and print it
-    res_str = "finished run successfully!"
-    try:
-        train(config, device=device)
-    except Exception as e:
-        res_str = "run failed with error:\n{}\n\n{}".format(e, traceback.format_exc())
-    print(res_str)
+    # # catch error during training and print it
+    # res_str = "finished run successfully!"
+    # try:
+    #     train(config, device=device)
+    # except Exception as e:
+    #     res_str = "run failed with error:\n{}\n\n{}".format(e, traceback.format_exc())
+    # print(res_str)
+
+    ext_il_config = json.load(open(args.il_config, 'r'))
+    il_config = config_factory(ext_il_config["algo_name"])
+    with il_config.values_unlocked():
+        il_config.update(ext_il_config)
+
+    ext_unc_cfg = json.load(open(args.unc_config, 'r'))
+    unc_config = config_factory(ext_unc_cfg["algo_name"])
+
+    with unc_config.values_unlocked():
+        unc_config.update(ext_unc_cfg)
+
+    # get torch device
+    il_device = TorchUtils.get_torch_device(try_to_use_cuda=il_config.train.cuda)
+    unc_device = TorchUtils.get_torch_device(try_to_use_cuda=unc_config.train.cuda)
+
+    train_mpdagger(il_config, unc_config, il_device, unc_device)
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
 
-    # External config file that overwrites default config
+    # External config file for IL policy
     parser.add_argument(
-        "--config",
+        "--il-config",
         type=str,
-        default=None,
-        help="(optional) path to a config json that will be used to override the default settings. \
-            If omitted, default settings are used. This is the preferred way to run experiments.",
+        default="/home/zharu-local/distilling-moma/distilling_moma/experiment_configs/test_dagger.json",
+        help="path to a config json that will be used to override the default settings",
     )
 
-    # Algorithm Name
+    # External config file for uncertainty estimation model
     parser.add_argument(
-        "--algo",
+        "--unc-config",
         type=str,
-        help="(optional) name of algorithm to run. Only needs to be provided if --config is not provided",
-    )
-
-    # Experiment Name (for tensorboard, saving models, etc.)
-    parser.add_argument(
-        "--name",
-        type=str,
-        default=None,
-        help="(optional) if provided, override the experiment name defined in the config",
+        default="/home/zharu-local/distilling-moma/distilling_moma/experiment_configs/test_vae.json",
+        help="path to a config json that will be used to override the default settings",
     )
 
     # Dataset path, to override the one in the config
     parser.add_argument(
         "--dataset",
         type=str,
-        default=None,
+        default="/home/zharu-local/distilling-moma/distilling_moma/data/dummy.hdf5",
         help="(optional) if provided, override the dataset path defined in the config",
     )
 

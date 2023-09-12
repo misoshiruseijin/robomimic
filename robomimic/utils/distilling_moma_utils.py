@@ -1,7 +1,7 @@
 """
-This file contains several utility functions used to define the main training loop. It 
-mainly consists of functions to assist with logging, rollouts, and the @run_epoch function,
-which is the core training logic for models in this repository.
+Based on robomimic/utils/train_utils.py
+
+Contains utility functions for distilling MOMA project.
 """
 import os
 import time
@@ -12,7 +12,8 @@ import h5py
 import imageio
 import numpy as np
 from copy import deepcopy
-from collections import OrderedDict
+from collections import OrderedDict, defaultdict
+
 
 import torch
 from torch.utils.data import DataLoader
@@ -26,6 +27,15 @@ from robomimic.utils.dataset import SequenceDataset
 from robomimic.envs.env_base import EnvBase
 from robomimic.envs.wrappers import EnvWrapper
 from robomimic.algo import RolloutPolicy
+
+MODEL_TYPE_TO_DATAFILE_CONTENT = {
+    "vae" : {
+        "obs" : ["rgb"],
+        "non_obs" : ["actions"],
+    }
+}
+
+################################ Training Utils ################################
 
 def get_exp_dir(config, auto_remove_exp_dir=False):
     """
@@ -165,223 +175,11 @@ def dataset_factory(config, obs_keys, filter_by_attribute=None, dataset_path=Non
 
     return dataset
 
-# def run_rollout(
-#         policy, 
-#         env, 
-#         horizon,
-#         use_goals=False,
-#         render=False,
-#         video_writer=None,
-#         video_skip=5,
-#         terminate_on_success=False,
-#     ):
-#     """
-#     Runs a rollout in an environment with the current network parameters.
-
-#     Args:
-#         policy (RolloutPolicy instance): policy to use for rollouts.
-
-#         env (EnvBase instance): environment to use for rollouts.
-
-#         horizon (int): maximum number of steps to roll the agent out for
-
-#         use_goals (bool): if True, agent is goal-conditioned, so provide goal observations from env
-
-#         render (bool): if True, render the rollout to the screen
-
-#         video_writer (imageio Writer instance): if not None, use video writer object to append frames at 
-#             rate given by @video_skip
-
-#         video_skip (int): how often to write video frame
-
-#         terminate_on_success (bool): if True, terminate episode early as soon as a success is encountered
-
-#     Returns:
-#         results (dict): dictionary containing return, success rate, etc.
-#         traj (dict): dictionary containing rollout trajectory where expert was in control. Could be empty if expert was never in control.
-#     """
-
-#     # dummy functions for testing
-#     def get_dummy_action():
-#         # return np.zeros(env.action_dimension)
-#         return np.random.uniform(-10, 10, env.action_dimension)
-#     def policy_needs_help():
-#         return True
-
-#     assert isinstance(policy, RolloutPolicy)
-#     assert isinstance(env, EnvBase) or isinstance(env, EnvWrapper)
-
-#     policy.start_episode()
-
-#     ob_dict = env.reset()
-#     goal_dict = None
-#     if use_goals:
-#         # retrieve goal from the environment
-#         goal_dict = env.get_goal()
-
-#     results = {}
-#     video_count = 0  # video frame counter
-
-#     total_reward = 0.
-#     success = { k: False for k in env.is_success() } # success metrics
-
-#     # keep track of rollout trajectories
-#     traj = {
-#         "obs" : [],
-#         "next_obs" : [],
-#         "actions" : [],
-#         "rewards" : [],
-#         "dones" : [],
-#     }
-
-#     is_expert_in_control = False
-
-#     try:
-#         for step_i in range(horizon):
-
-#             # NOTE : for now, once expert takes control, the expert finishes this episode without handing control back to student
-#             if not is_expert_in_control and policy_needs_help(): # TODO - implement this
-#                 is_expert_in_control = True
-            
-#             ######## Case: Expert is in Control ########
-#             # NOTE: this ignores rollout horizon and executes expert actions until success or failure
-#             if is_expert_in_control:
-
-#                 # TODO - below is a placeholder. Implement a function that returns the correct generator 
-#                 ac_generator = env.controller.grasp(env.objects["grasp_obj"], track_obj=True) 
-                
-#                 # TODO - replace below block with skill_wrapper's execute_skill function
-#                 for ac, skill_name in ac_generator:
-#                     try:
-#                         next_ob_dict, r, done, _ = env.step(ac)
-
-#                         # The saved observations are raw observations (not normalized) to match original dataset
-#                         traj["obs"].append(ob_dict)
-#                         traj["next_obs"].append(next_ob_dict)
-#                         traj["actions"].append(ac)
-#                         traj["rewards"].append(r)
-#                         traj["dones"].append(done) 
-
-#                         # render to screen
-#                         if render:
-#                             env.render(mode="human")
-
-#                         # compute reward
-#                         total_reward += r
-
-#                         cur_success_metrics = env.is_success()
-#                         for k in success:
-#                             success[k] = success[k] or cur_success_metrics[k]
-
-#                         # visualization - # TODO: figure out offscreen rendering in og env (implement render function in moma_wrapper)
-#                         if video_writer is not None:
-#                             if video_count % video_skip == 0:
-#                                 video_img = env.render(mode="rgb_array", height=512, width=512)
-#                                 video_writer.append_data(video_img)
-
-#                             video_count += 1
-                        
-#                         # update ob_dict
-#                         ob_dict = next_ob_dict
-#                     except:
-#                         print("skill execution failed")
-
-#                 # expert finished executing
-#                 if not success["task"]: # if expert failed, trajectory should not be stored
-#                     traj = {
-#                         "obs" : [],
-#                         "next_obs" : [],
-#                         "actions" : [],
-#                         "rewards" : [],
-#                         "dones" : [],
-#                     }
-
-#                 break
-                    
-#             ######## Case: Student is in Control ########
-#             else:
-#                 # process observations (observations used in rollout must be processed)
-#                 obs = env.process_observations(ob_dict)
-#                 ac = policy(ob=obs, goal=goal_dict)
-#                 # TODO - action from policy is normalized. unnormalize action before stepping
-#                 next_ob_dict, r, done, _ = env.step(ac)
-#                 step_i += 1
-
-#                 # render to screen
-#                 if render:
-#                     env.render(mode="human")
-
-#                 # compute reward
-#                 total_reward += r
-
-#                 cur_success_metrics = env.is_success()
-#                 for k in success:
-#                     success[k] = success[k] or cur_success_metrics[k]
-
-#                 # visualization - # TODO: figure out offscreen rendering in og env (implement render function in moma_wrapper)
-#                 if video_writer is not None:
-#                     if video_count % video_skip == 0:
-#                         video_img = env.render(mode="rgb_array", height=512, width=512)
-#                         video_writer.append_data(video_img)
-
-#                     video_count += 1
-                
-#                 # update ob_dict
-#                 ob_dict = next_ob_dict
-
-#                 # break if done
-#                 if done or (terminate_on_success and success["task"]):
-#                     break
-#         print(f"============== finished one rollout ({step_i} steps) ==============")
-
-#     except env.rollout_exceptions as e:
-#         print("WARNING: got rollout exception {}".format(e))
-#         # something went wrong. don't store trajectory
-#         traj = {
-#             "obs" : [],
-#             "next_obs" : [],
-#             "actions" : [],
-#             "rewards" : [],
-#             "dones" : [],
-#         }
-
-#     results["Return"] = total_reward
-#     results["Horizon"] = step_i + 1
-#     results["Success_Rate"] = float(success["task"])
-
-#     # log additional success metrics
-#     for k in success:
-#         if k != "task":
-#             results["{}_Success_Rate".format(k)] = float(success[k])
-
-#     # postprocess trajectory - covnert obs, actions, rewards, dones, from list of dicts to dict of array
-#     # process observations
-#     traj_len = len(traj["obs"])
-#     if traj_len > 0:
-#         processed_obs = {}
-#         processed_next_obs = {}
-#         ob_keys = [k for k in traj["obs"][0].keys()]
-#         for ob_key in ob_keys:
-#             ob = [traj["obs"][i][ob_key] for i in range(traj_len)]
-#             processed_obs[ob_key] = np.stack(ob, axis=0)
-
-#             next_ob = [traj["next_obs"][i][ob_key] for i in range(traj_len)]
-#             processed_next_obs[ob_key] = np.stack(next_ob, axis=0)
-
-#     traj["obs"] = processed_obs
-#     traj["next_obs"] = processed_next_obs
-
-#     # process actions, rewards, dones
-#     traj["actions"] = np.stack(traj["actions"], axis=0)
-#     traj["rewards"] = np.array(traj["rewards"])
-#     traj["dones"] = np.array(traj["dones"])
-
-#     return results, traj
-
 def run_rollout(
         policy, 
         env, 
         horizon,
+        uncertainty_data_path,
         use_goals=False,
         render=False,
         video_writer=None,
@@ -397,6 +195,8 @@ def run_rollout(
         env (EnvBase instance): environment to use for rollouts.
 
         horizon (int): maximum number of steps to roll the agent out for
+
+        uncertainty_data_path (str): path to hdf5 dataset for uncertainty model
 
         use_goals (bool): if True, agent is goal-conditioned, so provide goal observations from env
 
@@ -423,7 +223,7 @@ def run_rollout(
     
     def get_skill():
         # dummy function that return skill action generator and skill name
-        ac_generator = env.env.controller.grasp(env.env.objects["grasp_obj"], track_obj=True) 
+        ac_generator = env.env.controller.grasp(env.env.objects["grasp_obj"]) #, track_obj=True) 
         skill_name = "grasp"
         return ac_generator, skill_name
 
@@ -445,6 +245,11 @@ def run_rollout(
 
     is_expert_in_control = False
     expert_succeeded = False
+
+    student_traj = []
+    
+    n_addded_traj_il = 0
+    n_added_traj_unc = 0
 
     try:
         for step_i in range(horizon):
@@ -469,16 +274,61 @@ def run_rollout(
                 break
                     
             ######## Case: Student is in Control ########
+            # else:
+            #     # process observations (observations used in rollout must be processed)
+            #     obs = env.get_observation(ob_dict, postprocess_for_eval=True)
+            #     # get aciton from policy
+            #     ac = policy(ob=obs, goal=goal_dict)
+            #     # action from policy is normalized. unnormalize action before stepping
+            #     ac = env.denormalize_action(ac)
+            #     # step
+            #     next_ob_dict, r, done, _ = env.step(ac)
+            #     step_i += 1
+
+            #     # render to screen - TODO 
+            #     if render:
+            #         env.render(mode="human")
+
+            #     # compute reward
+            #     total_reward += r
+
+            #     cur_success_metrics = env.is_success()
+            #     for k in success:
+            #         success[k] = success[k] or cur_success_metrics[k]
+
+            #     # visualization - # TODO: figure out offscreen rendering in og env (implement render function in moma_wrapper)
+            #     if video_writer is not None:
+            #         if video_count % video_skip == 0:
+            #             video_img = env.render(mode="rgb_array", height=512, width=512)
+            #             video_writer.append_data(video_img)
+
+            #         video_count += 1
+                
+            #     # update ob_dict
+            #     ob_dict = next_ob_dict
+
+            #     # break if done
+            #     if done or (terminate_on_success and success["task"]):
+            #         break
             else:
                 # process observations (observations used in rollout must be processed)
                 obs = env.get_observation(ob_dict, postprocess_for_eval=True)
                 # get aciton from policy
                 ac = policy(ob=obs, goal=goal_dict)
                 # action from policy is normalized. unnormalize action before stepping
-                ac = env.denormalize_action(ac)
+                denormalized_ac = env.denormalize_action(ac)
                 # step
-                next_ob_dict, r, done, _ = env.step(ac)
+                next_ob_dict, r, done, _ = env.step(denormalized_ac)
                 step_i += 1
+
+                # store student step
+                step_data = {}
+                step_data["obs"] = env.process_obs(ob_dict)
+                step_data["action"] = ac
+                step_data["reward"] = r
+                step_data["done"] = done
+                step_data["next_obs"] = env.process_obs(next_ob_dict)
+                student_traj.append(step_data)
 
                 # render to screen - TODO 
                 if render:
@@ -505,7 +355,24 @@ def run_rollout(
                 # break if done
                 if done or (terminate_on_success and success["task"]):
                     break
+
         print(f"============== finished one rollout ({total_steps} steps) ==============")
+        # if task succeeded, aggregate datasets
+        if success["task"]:
+            # uncertainty dataset
+            skill_type, expert_traj = env.get_current_traj_history()[0]
+            with h5py.File(uncertainty_data_path, "r+") as file:
+                # TODO - get model type in a proper way
+                # add expert component
+                if len(expert_traj) > 0:
+                    aggregate_uncertainty_detector_dataset(expert_traj, skill_type, file, "vae")
+                    n_added_traj_unc += 1
+                # add student component
+                if len(student_traj) > 0:
+                    aggregate_uncertainty_detector_dataset(student_traj, "none", file, "vae")
+                    n_added_traj_unc += 1        
+            # BC dataset can be aggregated using wrapper function
+            env.flush_current_traj()
 
     except env.rollout_exceptions as e:
         print("WARNING: got rollout exception {}".format(e))
@@ -520,13 +387,13 @@ def run_rollout(
         if k != "task":
             results["{}_Success_Rate".format(k)] = float(success[k])
 
-    return results, expert_succeeded
-
+    return results, expert_succeeded, n_added_traj_unc
 
 def rollout_with_stats(
         policy,
         envs,
         horizon,
+        uncertainty_data_path,
         use_goals=False,
         num_episodes=None,
         render=False,
@@ -602,7 +469,9 @@ def rollout_with_stats(
         video_paths = { k : os.path.join(video_dir, "{}{}".format(k, video_str)) for k in envs }
         video_writers = { k : imageio.get_writer(video_paths[k], fps=20) for k in envs }
 
-    n_added_traj = 0 # number of expert trajectories added to dataset
+    total_il_traj_added = 0 # number of expert trajectories added to dataset
+    total_unc_traj_added = 0
+
     for env_name, env in envs.items():
         env_video_writer = None
         if write_video:
@@ -621,18 +490,20 @@ def rollout_with_stats(
         for ep_i in iterator:
             print(f"episode {ep_i+1} / {num_episodes}")
             rollout_timestamp = time.time()
-            rollout_info, rollout_suuccess = run_rollout(
+            rollout_info, rollout_suuccess, n_added_traj_unc = run_rollout(
                 policy=policy,
                 env=env,
                 horizon=horizon,
+                uncertainty_data_path=uncertainty_data_path,
                 render=render,
                 use_goals=use_goals,
                 video_writer=env_video_writer,
                 video_skip=video_skip,
                 terminate_on_success=terminate_on_success,
             )
+            total_unc_traj_added += n_added_traj_unc
             if rollout_suuccess:
-                n_added_traj += 1
+                total_il_traj_added += 1
             rollout_info["time"] = time.time() - rollout_timestamp
             rollout_logs.append(rollout_info)
             num_success += rollout_info["Success_Rate"]
@@ -654,7 +525,7 @@ def rollout_with_stats(
         # close video writer that was used for all envs
         video_writer.close()
 
-    return all_rollout_logs, video_paths, n_added_traj
+    return all_rollout_logs, video_paths, total_il_traj_added, total_unc_traj_added
 
 def should_save_from_rollout_logs(
         all_rollout_logs,
@@ -867,6 +738,9 @@ def is_every_n_steps(interval, current_step, skip_zero=False):
         return False
     return current_step % interval == 0
 
+
+################################ Datafile and DataLoader Utils ################################
+
 def initialize_dataloaders(config, shape_meta):
     """
     Returns training and validation data loaders.
@@ -926,29 +800,114 @@ def initialize_dataloaders(config, shape_meta):
 
     return train_loader, valid_loader, obs_normalization_stats
 
-# def aggregate_dataset(hdf5_path, trajectories):
-#     """
-#     Adds trajectories to hdf5 file
-#     """
-#     if isinstance(trajectories, dict):
-#         trajectories = [trajectories]
-#     assert isinstance(trajectories, list)
+def create_uncertainty_detector_dataset(srcfile_path, model_type):
+    """
+    Create a new dataset for uncertainty detection model from a full dataset. The new dataset contains only data that is relevant to the specified uncertainty detector.
+    
+    Args:
+        srcfile_path (str): path to full dataset
+        model_type (str): type of uncertainty detector model. One of ["vae",...]
 
-#     with h5py.File(hdf5_path, "r+") as f:
-#         data_grp = f.require_group("data")
-#         n_traj = len(data_grp.keys())
-#         for i, traj in enumerate(trajectories):
-#             traj_grp = data_grp.create_group(f"traj_{n_traj + i}")
-#             traj_grp.attrs["num_samples"] = traj["rewards"].shape[0]
+    Returns:
+        new_datapath: path to new dataset
+    """
 
-#             # add observations
-#             obs_grp = traj_grp.create_group("obs")
-#             next_obs_grp = traj_grp.create_group("next_obs")
-#             for key in traj["obs"]:
-#                 obs_grp.create_dataset(key, data=traj["obs"][key])
-#                 next_obs_grp.create_dataset(key, data=traj["next_obs"][key])
+    assert model_type in MODEL_TYPE_TO_DATAFILE_CONTENT.keys(), "model_type must be one of {}".format(MODEL_TYPE_TO_DATAFILE_CONTENT.keys())
+    keys_to_add = MODEL_TYPE_TO_DATAFILE_CONTENT[model_type]
 
-#             # add actions, rewards, dones
-#             traj_grp.create_dataset("actions", data=traj["actions"])
-#             traj_grp.create_dataset("rewards", data=traj["rewards"])
-#             traj_grp.create_dataset("dones", data=traj["dones"])
+    srcfile = h5py.File(srcfile_path, "r")
+
+    # if file exists at dstfile_path, delete it and create a new file
+    data_dir = os.path.dirname(srcfile_path)
+    dstfile_path = os.path.join(data_dir, f"{model_type}_" + os.path.basename(srcfile_path))
+    if os.path.isfile(dstfile_path):
+        os.remove(dstfile_path)
+    dstfile = h5py.File(dstfile_path, "w")
+
+    # copy over data universal to all uncertainty models
+    data_grp = dstfile.create_group("data")
+    mask_grp = dstfile.create_group("mask")
+    data_grp.attrs["env_args"] = srcfile["data"].attrs["env_args"]
+    data_grp.attrs["total"] = srcfile["data"].attrs["total"]
+    for skill_type, grps in srcfile["mask"].items():
+        mask_grp.create_dataset(skill_type, data=grps)
+
+    for demo_name in srcfile["data"].keys():
+        demo_grp = data_grp.create_group(demo_name)
+        demo_grp.attrs["num_samples"] = srcfile["data"][demo_name].attrs["num_samples"]
+
+        # copy over relevant observations
+        if len(keys_to_add["obs"]) > 0:
+            obs_grp = demo_grp.create_group("obs")
+            next_obs_grp = demo_grp.create_group("next_obs")
+            for mod in keys_to_add["obs"]:
+                obs_grp.create_dataset(mod, data=srcfile["data"][demo_name]["obs"][mod])
+                next_obs_grp.create_dataset(mod, data=srcfile["data"][demo_name]["next_obs"][mod])
+
+        # copy over other relevant data (acitons, rewards, dones, etc.)
+        for non_obs in keys_to_add["non_obs"]:
+            demo_grp.create_dataset(non_obs, data=srcfile["data"][demo_name][non_obs])
+
+    srcfile.close()
+    dstfile.close()
+
+    return dstfile_path
+
+def aggregate_uncertainty_detector_dataset(traj_data, skill_type, hdf5_file, model_type):
+    """
+    Aggregates uncertainty detector dataset
+
+    Args:
+        traj_data (list) : single trajectory as a list of dictionaries
+        hdf5_file (h5py.File) : hdf5 file to add the trajectory to
+        model_type (str): type of uncertainty detector model. One of ["vae",...]
+    """
+
+    assert model_type in MODEL_TYPE_TO_DATAFILE_CONTENT.keys(), "model_type must be one of {}".format(MODEL_TYPE_TO_DATAFILE_CONTENT.keys())
+    keys_to_add = MODEL_TYPE_TO_DATAFILE_CONTENT[model_type]
+
+    n_demos = len(list(hdf5_file["data"].keys()))
+
+    data_grp = hdf5_file.require_group("data")
+    traj_grp = data_grp.create_group(f"demo_{n_demos}")
+    traj_grp.attrs["num_samples"] = len(traj_data)
+
+    obss = defaultdict(list)
+    next_obss = defaultdict(list)
+    actions = []
+    rewards = []
+    dones = []
+
+    for step_data in traj_data:
+        for mod, step_mod_data in step_data["obs"].items():
+            if mod in keys_to_add["obs"]:
+                obss[mod].append(step_mod_data)
+        for mod, step_mod_data in step_data["next_obs"].items():
+            if mod in keys_to_add["obs"]:
+                next_obss[mod].append(step_mod_data)
+        actions.append(step_data["action"])
+        rewards.append(step_data["reward"])
+        dones.append(step_data["done"])
+
+    obs_grp = traj_grp.create_group("obs")
+    for mod, traj_mod_data in obss.items():
+        obs_grp.create_dataset(mod, data=np.stack(traj_mod_data, axis=0))
+    next_obs_grp = traj_grp.create_group("next_obs")
+    for mod, traj_mod_data in next_obss.items():
+        next_obs_grp.create_dataset(mod, data=np.stack(traj_mod_data, axis=0))
+
+    if "actions" in keys_to_add:
+        traj_grp.create_dataset("actions", data=np.stack(actions, axis=0))
+    if "rewards" in keys_to_add:
+        traj_grp.create_dataset("rewards", data=np.stack(rewards, axis=0))
+    if "dones" in keys_to_add:
+        traj_grp.create_dataset("dones", data=np.stack(dones, axis=0))
+
+    # update total step and skill mask in hdf5 file
+    data_grp.attrs["total"] = len(traj_data)
+    mask_grp = hdf5_file.require_group("mask")
+    if skill_type in mask_grp.keys():
+        old_data = [data.decode("utf-8") for data in mask_grp[skill_type][:]]
+        del mask_grp[skill_type]
+    new_data = old_data + [f"demo_{n_demos}"]
+    mask_grp.create_dataset(skill_type, data=new_data)

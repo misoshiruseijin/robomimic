@@ -196,6 +196,9 @@ class BaseConfig(Config):
         self.train.num_epochs = 2000    # number of training epochs
         self.train.seed = 1             # seed for training (for reproducibility)
 
+        # MP-DAgger settings
+        self.train.num_epochs_per_loop = 30
+
     def algo_config(self):
         """
         This function populates the `config.algo` attribute of the config, and is given to the 

@@ -64,7 +64,7 @@ class ErrorDetectorConfig(BaseConfig):
         self.algo.vae.prior_layer_dims = (300, 400) 
 
         # VAE vs. CVAE
-        self.algo.conditional = False   
+        self.algo.conditional = False
 
     def observation_config(self):
         """
