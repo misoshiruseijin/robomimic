@@ -6,7 +6,7 @@ in dataset files.
 from copy import deepcopy
 import robomimic.envs.env_base as EB
 from robomimic.utils.log_utils import log_warning
-
+import sys
 
 def get_env_class(env_meta=None, env_type=None, env=None):
     """
@@ -44,6 +44,7 @@ def get_env_class(env_meta=None, env_type=None, env=None):
     elif env_type == EB.EnvType.OG_DISTILLING_MOMA_TYPE:
         # from omnimimic.envs.skill_rollout_wrapper import OmnimimicSkillRolloutWrapper
         # return OmnimimicSkillRolloutWrapper
+        sys.path.append("/home/zharu-local/distilling-moma")
         from distilling_moma.utils.env_utils import get_distilling_moma_env_class
         return get_distilling_moma_env_class(env_name=env_meta["env_name"])
 

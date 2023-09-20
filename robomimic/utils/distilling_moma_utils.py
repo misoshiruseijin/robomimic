@@ -14,7 +14,6 @@ import numpy as np
 from copy import deepcopy
 from collections import OrderedDict, defaultdict
 
-
 import torch
 from torch.utils.data import DataLoader
 
@@ -34,6 +33,8 @@ MODEL_TYPE_TO_DATAFILE_CONTENT = {
         "non_obs" : ["actions"],
     }
 }
+
+QUERY_METHODS = ["vae"]
 
 ################################ Training Utils ################################
 
@@ -175,6 +176,220 @@ def dataset_factory(config, obs_keys, filter_by_attribute=None, dataset_path=Non
 
     return dataset
 
+## version without uncertainty model ##
+# def run_rollout(
+#         policy, 
+#         env, 
+#         horizon,
+#         use_goals=False,
+#         render=False,
+#         video_writer=None,
+#         video_skip=5,
+#         terminate_on_success=False,
+#     ):
+#     """
+#     Runs a rollout in an environment with the current network parameters.
+
+#     Args:
+#         policy (RolloutPolicy instance): policy to use for rollouts.
+
+#         env (EnvBase instance): environment to use for rollouts.
+
+#         horizon (int): maximum number of steps to roll the agent out for
+
+#         use_goals (bool): if True, agent is goal-conditioned, so provide goal observations from env
+
+#         render (bool): if True, render the rollout to the screen
+
+#         video_writer (imageio Writer instance): if not None, use video writer object to append frames at 
+#             rate given by @video_skip
+
+#         video_skip (int): how often to write video frame
+
+#         terminate_on_success (bool): if True, terminate episode early as soon as a success is encountered
+
+#     Returns:
+#         results (dict): dictionary containing return, success rate, etc.
+#         traj (dict): dictionary containing rollout trajectory where expert was in control. Could be empty if expert was never in control.
+#     """
+
+#     # dummy functions for testing
+#     def get_dummy_action():
+#         # return np.zeros(env.action_dimension)
+#         return np.random.uniform(-10, 10, env.action_dimension)
+#     def policy_needs_help():
+#         return True
+
+#     assert isinstance(policy, RolloutPolicy)
+#     assert isinstance(env, EnvBase) or isinstance(env, EnvWrapper)
+
+#     policy.start_episode()
+
+#     ob_dict = env.reset()
+#     goal_dict = None
+#     if use_goals:
+#         # retrieve goal from the environment
+#         goal_dict = env.get_goal()
+
+#     results = {}
+#     video_count = 0  # video frame counter
+
+#     total_reward = 0.
+#     success = { k: False for k in env.is_success() } # success metrics
+
+#     # keep track of rollout trajectories
+#     traj = {
+#         "obs" : [],
+#         "next_obs" : [],
+#         "actions" : [],
+#         "rewards" : [],
+#         "dones" : [],
+#     }
+
+#     is_expert_in_control = False
+
+#     try:
+#         for step_i in range(horizon):
+
+#             # NOTE : for now, once expert takes control, the expert finishes this episode without handing control back to student
+#             if not is_expert_in_control and policy_needs_help(): # TODO - implement this
+#                 is_expert_in_control = True
+
+#             ######## Case: Expert is in Control ########
+#             # NOTE: this ignores rollout horizon and executes expert actions until success or failure
+#             if is_expert_in_control:
+
+#                 # TODO - below is a placeholder. Implement a function that returns the correct generator 
+#                 ac_generator = env.controller.grasp(env.objects["grasp_obj"], track_obj=True) 
+
+#                 # TODO - replace below block with skill_wrapper's execute_skill function
+#                 for ac, skill_name in ac_generator:
+#                     try:
+#                         next_ob_dict, r, done, _ = env.step(ac)
+
+#                         # The saved observations are raw observations (not normalized) to match original dataset
+#                         traj["obs"].append(ob_dict)
+#                         traj["next_obs"].append(next_ob_dict)
+#                         traj["actions"].append(ac)
+#                         traj["rewards"].append(r)
+#                         traj["dones"].append(done) 
+
+#                         # render to screen
+#                         if render:
+#                             env.render(mode="human")
+
+#                         # compute reward
+#                         total_reward += r
+
+#                         cur_success_metrics = env.is_success()
+#                         for k in success:
+#                             success[k] = success[k] or cur_success_metrics[k]
+
+#                         # visualization - # TODO: figure out offscreen rendering in og env (implement render function in moma_wrapper)
+#                         if video_writer is not None:
+#                             if video_count % video_skip == 0:
+#                                 video_img = env.render(mode="rgb_array", height=512, width=512)
+#                                 video_writer.append_data(video_img)
+
+#                             video_count += 1
+
+#                         # update ob_dict
+#                         ob_dict = next_ob_dict
+#                     except:
+#                         print("skill execution failed")
+
+#                 # expert finished executing
+#                 if not success["task"]: # if expert failed, trajectory should not be stored
+#                     traj = {
+#                         "obs" : [],
+#                         "next_obs" : [],
+#                         "actions" : [],
+#                         "rewards" : [],
+#                         "dones" : [],
+#                     }
+
+#                 break
+
+#             ######## Case: Student is in Control ########
+#             else:
+#                 # process observations (observations used in rollout must be processed)
+#                 obs = env.process_observations(ob_dict)
+#                 ac = policy(ob=obs, goal=goal_dict)
+#                 # TODO - action from policy is normalized. unnormalize action before stepping
+#                 next_ob_dict, r, done, _ = env.step(ac)
+#                 step_i += 1
+
+#                 # render to screen
+#                 if render:
+#                     env.render(mode="human")
+
+#                 # compute reward
+#                 total_reward += r
+
+#                 cur_success_metrics = env.is_success()
+#                 for k in success:
+#                     success[k] = success[k] or cur_success_metrics[k]
+
+#                 # visualization - # TODO: figure out offscreen rendering in og env (implement render function in moma_wrapper)
+#                 if video_writer is not None:
+#                     if video_count % video_skip == 0:
+#                         video_img = env.render(mode="rgb_array", height=512, width=512)
+#                         video_writer.append_data(video_img)
+
+#                     video_count += 1
+
+#                 # update ob_dict
+#                 ob_dict = next_ob_dict
+
+#                 # break if done
+#                 if done or (terminate_on_success and success["task"]):
+#                     break
+#         print(f"============== finished one rollout ({step_i} steps) ==============")
+
+#     except env.rollout_exceptions as e:
+#         print("WARNING: got rollout exception {}".format(e))
+#         # something went wrong. don't store trajectory
+#         traj = {
+#             "obs" : [],
+#             "next_obs" : [],
+#             "actions" : [],
+#             "rewards" : [],
+#             "dones" : [],
+#         }
+
+#     results["Return"] = total_reward
+#     results["Horizon"] = step_i + 1
+#     results["Success_Rate"] = float(success["task"])
+
+#     # log additional success metrics
+#     for k in success:
+#         if k != "task":
+#             results["{}_Success_Rate".format(k)] = float(success[k])
+
+#     # postprocess trajectory - covnert obs, actions, rewards, dones, from list of dicts to dict of array
+#     # process observations
+#     traj_len = len(traj["obs"])
+#     if traj_len > 0:
+#         processed_obs = {}
+#         processed_next_obs = {}
+#         ob_keys = [k for k in traj["obs"][0].keys()]
+#         for ob_key in ob_keys:
+#             ob = [traj["obs"][i][ob_key] for i in range(traj_len)]
+#             processed_obs[ob_key] = np.stack(ob, axis=0)
+
+#             next_ob = [traj["next_obs"][i][ob_key] for i in range(traj_len)]
+#             processed_next_obs[ob_key] = np.stack(next_ob, axis=0)
+
+#     traj["obs"] = processed_obs
+#     traj["next_obs"] = processed_next_obs
+
+#     # process actions, rewards, dones
+#     traj["actions"] = np.stack(traj["actions"], axis=0)
+#     traj["rewards"] = np.array(traj["rewards"])
+#     traj["dones"] = np.array(traj["dones"])
+
+#     return results, traj
+
 def run_rollout(
         policy, 
         env, 
@@ -185,6 +400,9 @@ def run_rollout(
         video_writer=None,
         video_skip=5,
         terminate_on_success=False,
+        unc_model=None,
+        unc_device=None,
+        query_method=None,
     ):
     """
     Runs a rollout in an environment with the current network parameters.
@@ -215,16 +433,16 @@ def run_rollout(
         expert_succeeded (bool): True if rollout was successful (i.e. expert was in control and finished the task successfully)        
     """
 
-    def policy_needs_help():
-        prob = 0.1
-        if np.random.uniform() < prob:
-            return True
-        return False
+    # def policy_needs_help():
+    #     prob = 1.0
+    #     if np.random.uniform() < prob:
+    #         return True
+    #     return False
     
-    def get_skill():
+    def get_skill(): # TODO implement this in each environment
         # dummy function that return skill action generator and skill name
-        ac_generator = env.env.controller.grasp(env.env.objects["grasp_obj"]) #, track_obj=True) 
-        skill_name = "grasp"
+        ac_generator = env.env.controller._grasp_ik(env.env.objects["grasp_obj"]) #, track_obj=True) 
+        skill_name = "pick"
         return ac_generator, skill_name
 
     assert isinstance(policy, RolloutPolicy)
@@ -234,6 +452,7 @@ def run_rollout(
 
     ob_dict = env.reset()
     ob_dict = env.reset()
+    prev_ob_dict = ob_dict
     goal_dict = None
 
     results = {}
@@ -255,9 +474,15 @@ def run_rollout(
         for step_i in range(horizon):
 
             # NOTE : for now, once expert takes control, the expert finishes this episode without handing control back to student
-            if not is_expert_in_control and policy_needs_help(): # TODO - implement this
+            # TODO - should be more general (this is only for vae)
+            query = should_query_expert(
+                unc_model=unc_model, query_method=query_method, unc_device=unc_device,
+                processed_ob_dict=env.process_obs(ob_dict, postprocess_for_eval=True)
+            )
+            if not is_expert_in_control and query: # TODO - implement this
+                print("Expert queried at step", step_i)
                 is_expert_in_control = True
-            
+
             ######## Case: Expert is in Control ########
             # NOTE: this ignores rollout horizon and executes expert actions until success or failure
             if is_expert_in_control:
@@ -274,47 +499,12 @@ def run_rollout(
                 break
                     
             ######## Case: Student is in Control ########
-            # else:
-            #     # process observations (observations used in rollout must be processed)
-            #     obs = env.get_observation(ob_dict, postprocess_for_eval=True)
-            #     # get aciton from policy
-            #     ac = policy(ob=obs, goal=goal_dict)
-            #     # action from policy is normalized. unnormalize action before stepping
-            #     ac = env.denormalize_action(ac)
-            #     # step
-            #     next_ob_dict, r, done, _ = env.step(ac)
-            #     step_i += 1
-
-            #     # render to screen - TODO 
-            #     if render:
-            #         env.render(mode="human")
-
-            #     # compute reward
-            #     total_reward += r
-
-            #     cur_success_metrics = env.is_success()
-            #     for k in success:
-            #         success[k] = success[k] or cur_success_metrics[k]
-
-            #     # visualization - # TODO: figure out offscreen rendering in og env (implement render function in moma_wrapper)
-            #     if video_writer is not None:
-            #         if video_count % video_skip == 0:
-            #             video_img = env.render(mode="rgb_array", height=512, width=512)
-            #             video_writer.append_data(video_img)
-
-            #         video_count += 1
-                
-            #     # update ob_dict
-            #     ob_dict = next_ob_dict
-
-            #     # break if done
-            #     if done or (terminate_on_success and success["task"]):
-            #         break
             else:
                 # process observations (observations used in rollout must be processed)
                 obs = env.get_observation(ob_dict, postprocess_for_eval=True)
                 # get aciton from policy
                 ac = policy(ob=obs, goal=goal_dict)
+
                 # action from policy is normalized. unnormalize action before stepping
                 denormalized_ac = env.denormalize_action(ac)
                 # step
@@ -350,6 +540,7 @@ def run_rollout(
                     video_count += 1
                 
                 # update ob_dict
+                prev_ob_dict = ob_dict
                 ob_dict = next_ob_dict
 
                 # break if done
@@ -361,6 +552,7 @@ def run_rollout(
         if success["task"]:
             # uncertainty dataset
             skill_type, expert_traj = env.get_current_traj_history()[0]
+            # make sure the file is closed
             with h5py.File(uncertainty_data_path, "r+") as file:
                 # TODO - get model type in a proper way
                 # add expert component
@@ -394,6 +586,7 @@ def rollout_with_stats(
         envs,
         horizon,
         uncertainty_data_path,
+        query_method,
         use_goals=False,
         num_episodes=None,
         render=False,
@@ -403,6 +596,8 @@ def rollout_with_stats(
         video_skip=5,
         terminate_on_success=False,
         verbose=False,
+        unc_model=None,
+        unc_device=None,
     ):
     """
     Variant of train_utils.rollout_with_stats: A helper function used in the train loop to conduct evaluation rollouts per environment
@@ -500,6 +695,9 @@ def rollout_with_stats(
                 video_writer=env_video_writer,
                 video_skip=video_skip,
                 terminate_on_success=terminate_on_success,
+                unc_model=unc_model,
+                unc_device=unc_device,
+                query_method=query_method,
             )
             total_unc_traj_added += n_added_traj_unc
             if rollout_suuccess:
@@ -854,6 +1052,7 @@ def create_uncertainty_detector_dataset(srcfile_path, model_type):
     return dstfile_path
 
 def aggregate_uncertainty_detector_dataset(traj_data, skill_type, hdf5_file, model_type):
+
     """
     Aggregates uncertainty detector dataset
 
@@ -904,10 +1103,39 @@ def aggregate_uncertainty_detector_dataset(traj_data, skill_type, hdf5_file, mod
         traj_grp.create_dataset("dones", data=np.stack(dones, axis=0))
 
     # update total step and skill mask in hdf5 file
-    data_grp.attrs["total"] = len(traj_data)
+    total = data_grp.attrs["total"]
+    data_grp.attrs.modify("total", total + len(traj_data))
     mask_grp = hdf5_file.require_group("mask")
+    old_data = []
     if skill_type in mask_grp.keys():
         old_data = [data.decode("utf-8") for data in mask_grp[skill_type][:]]
         del mask_grp[skill_type]
     new_data = old_data + [f"demo_{n_demos}"]
     mask_grp.create_dataset(skill_type, data=new_data)
+
+
+################################ Uncertainty Detector Utils ################################
+
+def should_query_expert(query_method, unc_model=None, processed_ob_dict=None, unc_device=None):
+    """
+    For vae error detector, 
+    """
+    assert query_method in QUERY_METHODS, "query method must be one of {}".format(QUERY_METHODS)
+
+    if query_method == "vae":
+        assert processed_ob_dict is not None and unc_device is not None, \
+            "processed_ob_dict and unc_device must be provided for vae query method"
+        # preprocess ob_dict for vae model input
+        rgb_obs = torch.from_numpy(processed_ob_dict["rgb"][np.newaxis,:]).float().to(unc_device)
+        model_input = {
+            "obs" : {
+                "rgb" : rgb_obs,
+            },
+        }
+        recons_loss = unc_model.get_reconstruction_loss(model_input)
+        thresh = 0.02 # TODO - make this a hyperparameter
+        print("VAE reconstruction loss: ", recons_loss)
+        return recons_loss > thresh
+
+
+        

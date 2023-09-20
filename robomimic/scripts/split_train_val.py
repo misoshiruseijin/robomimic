@@ -37,14 +37,15 @@ def split_train_val_from_hdf5(hdf5_path, val_ratio=0.1, filter_key=None):
     """
 
     # retrieve number of demos
-    f = h5py.File(hdf5_path, "r")
-    if filter_key is not None:
-        print("using filter key: {}".format(filter_key))
-        demos = sorted([elem.decode("utf-8") for elem in np.array(f["mask/{}".format(filter_key)])])
-    else:
-        demos = sorted(list(f["data"].keys()))
-    num_demos = len(demos)
-    f.close()
+    # f = h5py.File(hdf5_path, "r")
+    with h5py.File(hdf5_path, "r") as f:
+        if filter_key is not None:
+            print("using filter key: {}".format(filter_key))
+            demos = sorted([elem.decode("utf-8") for elem in np.array(f["mask/{}".format(filter_key)])])
+        else:
+            demos = sorted(list(f["data"].keys()))
+        num_demos = len(demos)
+    # f.close()
 
     # get random split
     num_demos = len(demos)
