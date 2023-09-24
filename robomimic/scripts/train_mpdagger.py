@@ -94,7 +94,6 @@ def rollout_and_aggregate(
                 data_logger.record("Timing_Stats/Rollout_{}_{}".format(env_name, k[5:]), v, epoch)
             else:
                 data_logger.record("Rollout/{}/{}".format(k, env_name), v, epoch, log_stats=True)
-
         print("\nEpoch {} Rollouts took {}s (avg) with results:".format(epoch, rollout_logs["time"]))
         print('Env: {}'.format(env_name))
         print(json.dumps(rollout_logs, sort_keys=True, indent=4))
@@ -401,7 +400,7 @@ def train_mpdagger(il_config, unc_config, il_device, unc_device, il_model_ckpt=N
 
     done_training = (il_epochs_so_far >= il_config.train.num_epochs) and (unc_epochs_so_far >= unc_config.train.num_epochs)
     phases = ["unc", "il"]
-    training_phase = 0 # start with training uncertainty estimation model
+    training_phase = 1 # start with training uncertainty estimation model
     should_train_unc = True
 
     while not done_training:
@@ -544,14 +543,21 @@ def main(args):
     # print(res_str)
 
     # TODO - overwrite dataset path in config with args.dataset
-
-    
-    ext_il_config = json.load(open(args.il_config, 'r'))
-    il_config = config_factory(ext_il_config["algo_name"])
-    with il_config.values_unlocked():
-        il_config.update(ext_il_config)
-
+    ext_il_cfg = json.load(open(args.il_config, 'r'))
     ext_unc_cfg = json.load(open(args.unc_config, 'r'))
+
+    if args.debug:
+        # do 2 rollouts every 1 epoch
+        ext_il_cfg["experiment"]["rollout"]["n"] = 2
+        ext_il_cfg["experiment"]["rollout"]["rate"] = 1
+        ext_il_cfg["experiment"]["rollout"]["horizon"] = 100
+        ext_il_cfg["train"]["num_epochs_per_loop"] = 1
+        ext_unc_cfg["train"]["num_epochs_per_loop"] = 1
+
+    il_config = config_factory(ext_il_cfg["algo_name"])
+    with il_config.values_unlocked():
+        il_config.update(ext_il_cfg)
+
     unc_config = config_factory(ext_unc_cfg["algo_name"])
 
     with unc_config.values_unlocked():

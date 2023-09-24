@@ -177,218 +177,218 @@ def dataset_factory(config, obs_keys, filter_by_attribute=None, dataset_path=Non
     return dataset
 
 ## version without uncertainty model ##
-# def run_rollout(
-#         policy, 
-#         env, 
-#         horizon,
-#         use_goals=False,
-#         render=False,
-#         video_writer=None,
-#         video_skip=5,
-#         terminate_on_success=False,
-#     ):
-#     """
-#     Runs a rollout in an environment with the current network parameters.
+def run_rollout_without_active_query(
+        policy, 
+        env, 
+        horizon,
+        use_goals=False,
+        render=False,
+        video_writer=None,
+        video_skip=5,
+        terminate_on_success=False,
+    ):
+    """
+    Runs a rollout in an environment with the current network parameters.
 
-#     Args:
-#         policy (RolloutPolicy instance): policy to use for rollouts.
+    Args:
+        policy (RolloutPolicy instance): policy to use for rollouts.
 
-#         env (EnvBase instance): environment to use for rollouts.
+        env (EnvBase instance): environment to use for rollouts.
 
-#         horizon (int): maximum number of steps to roll the agent out for
+        horizon (int): maximum number of steps to roll the agent out for
 
-#         use_goals (bool): if True, agent is goal-conditioned, so provide goal observations from env
+        use_goals (bool): if True, agent is goal-conditioned, so provide goal observations from env
 
-#         render (bool): if True, render the rollout to the screen
+        render (bool): if True, render the rollout to the screen
 
-#         video_writer (imageio Writer instance): if not None, use video writer object to append frames at 
-#             rate given by @video_skip
+        video_writer (imageio Writer instance): if not None, use video writer object to append frames at 
+            rate given by @video_skip
 
-#         video_skip (int): how often to write video frame
+        video_skip (int): how often to write video frame
 
-#         terminate_on_success (bool): if True, terminate episode early as soon as a success is encountered
+        terminate_on_success (bool): if True, terminate episode early as soon as a success is encountered
 
-#     Returns:
-#         results (dict): dictionary containing return, success rate, etc.
-#         traj (dict): dictionary containing rollout trajectory where expert was in control. Could be empty if expert was never in control.
-#     """
+    Returns:
+        results (dict): dictionary containing return, success rate, etc.
+        traj (dict): dictionary containing rollout trajectory where expert was in control. Could be empty if expert was never in control.
+    """
 
-#     # dummy functions for testing
-#     def get_dummy_action():
-#         # return np.zeros(env.action_dimension)
-#         return np.random.uniform(-10, 10, env.action_dimension)
-#     def policy_needs_help():
-#         return True
+    # dummy functions for testing
+    def get_dummy_action():
+        # return np.zeros(env.action_dimension)
+        return np.random.uniform(-10, 10, env.action_dimension)
+    def policy_needs_help():
+        return True
 
-#     assert isinstance(policy, RolloutPolicy)
-#     assert isinstance(env, EnvBase) or isinstance(env, EnvWrapper)
+    assert isinstance(policy, RolloutPolicy)
+    assert isinstance(env, EnvBase) or isinstance(env, EnvWrapper)
 
-#     policy.start_episode()
+    policy.start_episode()
 
-#     ob_dict = env.reset()
-#     goal_dict = None
-#     if use_goals:
-#         # retrieve goal from the environment
-#         goal_dict = env.get_goal()
+    ob_dict = env.reset()
+    goal_dict = None
+    if use_goals:
+        # retrieve goal from the environment
+        goal_dict = env.get_goal()
 
-#     results = {}
-#     video_count = 0  # video frame counter
+    results = {}
+    video_count = 0  # video frame counter
 
-#     total_reward = 0.
-#     success = { k: False for k in env.is_success() } # success metrics
+    total_reward = 0.
+    success = { k: False for k in env.is_success() } # success metrics
 
-#     # keep track of rollout trajectories
-#     traj = {
-#         "obs" : [],
-#         "next_obs" : [],
-#         "actions" : [],
-#         "rewards" : [],
-#         "dones" : [],
-#     }
+    # keep track of rollout trajectories
+    traj = {
+        "obs" : [],
+        "next_obs" : [],
+        "actions" : [],
+        "rewards" : [],
+        "dones" : [],
+    }
 
-#     is_expert_in_control = False
+    is_expert_in_control = False
 
-#     try:
-#         for step_i in range(horizon):
+    try:
+        for step_i in range(horizon):
 
-#             # NOTE : for now, once expert takes control, the expert finishes this episode without handing control back to student
-#             if not is_expert_in_control and policy_needs_help(): # TODO - implement this
-#                 is_expert_in_control = True
+            # NOTE : for now, once expert takes control, the expert finishes this episode without handing control back to student
+            if not is_expert_in_control and policy_needs_help(): # TODO - implement this
+                is_expert_in_control = True
 
-#             ######## Case: Expert is in Control ########
-#             # NOTE: this ignores rollout horizon and executes expert actions until success or failure
-#             if is_expert_in_control:
+            ######## Case: Expert is in Control ########
+            # NOTE: this ignores rollout horizon and executes expert actions until success or failure
+            if is_expert_in_control:
 
-#                 # TODO - below is a placeholder. Implement a function that returns the correct generator 
-#                 ac_generator = env.controller.grasp(env.objects["grasp_obj"], track_obj=True) 
+                # TODO - below is a placeholder. Implement a function that returns the correct generator 
+                ac_generator = env.controller.grasp(env.objects["grasp_obj"], track_obj=True) 
 
-#                 # TODO - replace below block with skill_wrapper's execute_skill function
-#                 for ac, skill_name in ac_generator:
-#                     try:
-#                         next_ob_dict, r, done, _ = env.step(ac)
+                # TODO - replace below block with skill_wrapper's execute_skill function
+                for ac, skill_name in ac_generator:
+                    try:
+                        next_ob_dict, r, done, _ = env.step(ac)
 
-#                         # The saved observations are raw observations (not normalized) to match original dataset
-#                         traj["obs"].append(ob_dict)
-#                         traj["next_obs"].append(next_ob_dict)
-#                         traj["actions"].append(ac)
-#                         traj["rewards"].append(r)
-#                         traj["dones"].append(done) 
+                        # The saved observations are raw observations (not normalized) to match original dataset
+                        traj["obs"].append(ob_dict)
+                        traj["next_obs"].append(next_ob_dict)
+                        traj["actions"].append(ac)
+                        traj["rewards"].append(r)
+                        traj["dones"].append(done) 
 
-#                         # render to screen
-#                         if render:
-#                             env.render(mode="human")
+                        # render to screen
+                        if render:
+                            env.render(mode="human")
 
-#                         # compute reward
-#                         total_reward += r
+                        # compute reward
+                        total_reward += r
 
-#                         cur_success_metrics = env.is_success()
-#                         for k in success:
-#                             success[k] = success[k] or cur_success_metrics[k]
+                        cur_success_metrics = env.is_success()
+                        for k in success:
+                            success[k] = success[k] or cur_success_metrics[k]
 
-#                         # visualization - # TODO: figure out offscreen rendering in og env (implement render function in moma_wrapper)
-#                         if video_writer is not None:
-#                             if video_count % video_skip == 0:
-#                                 video_img = env.render(mode="rgb_array", height=512, width=512)
-#                                 video_writer.append_data(video_img)
+                        # visualization - # TODO: figure out offscreen rendering in og env (implement render function in moma_wrapper)
+                        if video_writer is not None:
+                            if video_count % video_skip == 0:
+                                video_img = env.render(mode="rgb_array", height=512, width=512)
+                                video_writer.append_data(video_img)
 
-#                             video_count += 1
+                            video_count += 1
 
-#                         # update ob_dict
-#                         ob_dict = next_ob_dict
-#                     except:
-#                         print("skill execution failed")
+                        # update ob_dict
+                        ob_dict = next_ob_dict
+                    except:
+                        print("skill execution failed")
 
-#                 # expert finished executing
-#                 if not success["task"]: # if expert failed, trajectory should not be stored
-#                     traj = {
-#                         "obs" : [],
-#                         "next_obs" : [],
-#                         "actions" : [],
-#                         "rewards" : [],
-#                         "dones" : [],
-#                     }
+                # expert finished executing
+                if not success["task"]: # if expert failed, trajectory should not be stored
+                    traj = {
+                        "obs" : [],
+                        "next_obs" : [],
+                        "actions" : [],
+                        "rewards" : [],
+                        "dones" : [],
+                    }
 
-#                 break
+                break
 
-#             ######## Case: Student is in Control ########
-#             else:
-#                 # process observations (observations used in rollout must be processed)
-#                 obs = env.process_observations(ob_dict)
-#                 ac = policy(ob=obs, goal=goal_dict)
-#                 # TODO - action from policy is normalized. unnormalize action before stepping
-#                 next_ob_dict, r, done, _ = env.step(ac)
-#                 step_i += 1
+            ######## Case: Student is in Control ########
+            else:
+                # process observations (observations used in rollout must be processed)
+                obs = env.process_observations(ob_dict)
+                ac = policy(ob=obs, goal=goal_dict)
+                # TODO - action from policy is normalized. unnormalize action before stepping
+                next_ob_dict, r, done, _ = env.step(ac)
+                step_i += 1
 
-#                 # render to screen
-#                 if render:
-#                     env.render(mode="human")
+                # render to screen
+                if render:
+                    env.render(mode="human")
 
-#                 # compute reward
-#                 total_reward += r
+                # compute reward
+                total_reward += r
 
-#                 cur_success_metrics = env.is_success()
-#                 for k in success:
-#                     success[k] = success[k] or cur_success_metrics[k]
+                cur_success_metrics = env.is_success()
+                for k in success:
+                    success[k] = success[k] or cur_success_metrics[k]
 
-#                 # visualization - # TODO: figure out offscreen rendering in og env (implement render function in moma_wrapper)
-#                 if video_writer is not None:
-#                     if video_count % video_skip == 0:
-#                         video_img = env.render(mode="rgb_array", height=512, width=512)
-#                         video_writer.append_data(video_img)
+                # visualization - # TODO: figure out offscreen rendering in og env (implement render function in moma_wrapper)
+                if video_writer is not None:
+                    if video_count % video_skip == 0:
+                        video_img = env.render(mode="rgb_array", height=512, width=512)
+                        video_writer.append_data(video_img)
 
-#                     video_count += 1
+                    video_count += 1
 
-#                 # update ob_dict
-#                 ob_dict = next_ob_dict
+                # update ob_dict
+                ob_dict = next_ob_dict
 
-#                 # break if done
-#                 if done or (terminate_on_success and success["task"]):
-#                     break
-#         print(f"============== finished one rollout ({step_i} steps) ==============")
+                # break if done
+                if done or (terminate_on_success and success["task"]):
+                    break
+        print(f"============== finished one rollout ({step_i} steps) ==============")
 
-#     except env.rollout_exceptions as e:
-#         print("WARNING: got rollout exception {}".format(e))
-#         # something went wrong. don't store trajectory
-#         traj = {
-#             "obs" : [],
-#             "next_obs" : [],
-#             "actions" : [],
-#             "rewards" : [],
-#             "dones" : [],
-#         }
+    except env.rollout_exceptions as e:
+        print("WARNING: got rollout exception {}".format(e))
+        # something went wrong. don't store trajectory
+        traj = {
+            "obs" : [],
+            "next_obs" : [],
+            "actions" : [],
+            "rewards" : [],
+            "dones" : [],
+        }
 
-#     results["Return"] = total_reward
-#     results["Horizon"] = step_i + 1
-#     results["Success_Rate"] = float(success["task"])
+    results["Return"] = total_reward
+    results["Horizon"] = step_i + 1
+    results["Success_Rate"] = float(success["task"])
 
-#     # log additional success metrics
-#     for k in success:
-#         if k != "task":
-#             results["{}_Success_Rate".format(k)] = float(success[k])
+    # log additional success metrics
+    for k in success:
+        if k != "task":
+            results["{}_Success_Rate".format(k)] = float(success[k])
 
-#     # postprocess trajectory - covnert obs, actions, rewards, dones, from list of dicts to dict of array
-#     # process observations
-#     traj_len = len(traj["obs"])
-#     if traj_len > 0:
-#         processed_obs = {}
-#         processed_next_obs = {}
-#         ob_keys = [k for k in traj["obs"][0].keys()]
-#         for ob_key in ob_keys:
-#             ob = [traj["obs"][i][ob_key] for i in range(traj_len)]
-#             processed_obs[ob_key] = np.stack(ob, axis=0)
+    # postprocess trajectory - covnert obs, actions, rewards, dones, from list of dicts to dict of array
+    # process observations
+    traj_len = len(traj["obs"])
+    if traj_len > 0:
+        processed_obs = {}
+        processed_next_obs = {}
+        ob_keys = [k for k in traj["obs"][0].keys()]
+        for ob_key in ob_keys:
+            ob = [traj["obs"][i][ob_key] for i in range(traj_len)]
+            processed_obs[ob_key] = np.stack(ob, axis=0)
 
-#             next_ob = [traj["next_obs"][i][ob_key] for i in range(traj_len)]
-#             processed_next_obs[ob_key] = np.stack(next_ob, axis=0)
+            next_ob = [traj["next_obs"][i][ob_key] for i in range(traj_len)]
+            processed_next_obs[ob_key] = np.stack(next_ob, axis=0)
 
-#     traj["obs"] = processed_obs
-#     traj["next_obs"] = processed_next_obs
+    traj["obs"] = processed_obs
+    traj["next_obs"] = processed_next_obs
 
-#     # process actions, rewards, dones
-#     traj["actions"] = np.stack(traj["actions"], axis=0)
-#     traj["rewards"] = np.array(traj["rewards"])
-#     traj["dones"] = np.array(traj["dones"])
+    # process actions, rewards, dones
+    traj["actions"] = np.stack(traj["actions"], axis=0)
+    traj["rewards"] = np.array(traj["rewards"])
+    traj["dones"] = np.array(traj["dones"])
 
-#     return results, traj
+    return results, traj
 
 def run_rollout(
         policy, 
@@ -403,6 +403,7 @@ def run_rollout(
         unc_model=None,
         unc_device=None,
         query_method=None,
+        query_expert=True,
     ):
     """
     Runs a rollout in an environment with the current network parameters.
@@ -427,21 +428,23 @@ def run_rollout(
 
         terminate_on_success (bool): if True, terminate episode early as soon as a success is encountered
 
+        unc_model (nn.Module instance): uncertainty model to use for active query. required dor some query methods
+
+        unc_device (torch.device instance): device to use for uncertainty model
+
+        query_method (str): method to use for active query. must be one of QUERY_METHODS
+
+        query_expert (bool): if True, query expert when uncertainty is high. set to False for evaluation rollout
+    
     Returns:
         results (dict): dictionary containing return, success rate, etc.
 
         expert_succeeded (bool): True if rollout was successful (i.e. expert was in control and finished the task successfully)        
     """
-
-    # def policy_needs_help():
-    #     prob = 1.0
-    #     if np.random.uniform() < prob:
-    #         return True
-    #     return False
     
     def get_skill(): # TODO implement this in each environment
         # dummy function that return skill action generator and skill name
-        ac_generator = env.env.controller._grasp_ik(env.env.objects["grasp_obj"]) #, track_obj=True) 
+        ac_generator = env.env.controller._grasp(env.env.objects["grasp_obj"]) #, track_obj=True) 
         skill_name = "pick"
         return ac_generator, skill_name
 
@@ -475,13 +478,16 @@ def run_rollout(
 
             # NOTE : for now, once expert takes control, the expert finishes this episode without handing control back to student
             # TODO - should be more general (this is only for vae)
-            query = should_query_expert(
-                unc_model=unc_model, query_method=query_method, unc_device=unc_device,
-                processed_ob_dict=env.process_obs(ob_dict, postprocess_for_eval=True)
-            )
-            if not is_expert_in_control and query: # TODO - implement this
-                print("Expert queried at step", step_i)
-                is_expert_in_control = True
+            if query_expert:
+                query = should_query_expert(
+                    unc_model=unc_model, query_method=query_method, unc_device=unc_device,
+                    processed_ob_dict=env.process_obs(ob_dict, postprocess_for_eval=True)
+                )
+                if not is_expert_in_control and query: 
+                    print("Expert queried at step", step_i)
+                    is_expert_in_control = True
+            else:
+                query = False
 
             ######## Case: Expert is in Control ########
             # NOTE: this ignores rollout horizon and executes expert actions until success or failure
@@ -510,6 +516,7 @@ def run_rollout(
                 # step
                 next_ob_dict, r, done, _ = env.step(denormalized_ac)
                 step_i += 1
+                total_steps = step_i
 
                 # store student step
                 step_data = {}
@@ -548,8 +555,9 @@ def run_rollout(
                     break
 
         print(f"============== finished one rollout ({total_steps} steps) ==============")
+        # breakpoint()
         # if task succeeded, aggregate datasets
-        if success["task"]:
+        if success["task"] and query_expert: # don't aggregate dataset if this is an evaluation rollout
             # uncertainty dataset
             skill_type, expert_traj = env.get_current_traj_history()[0]
             # make sure the file is closed
@@ -676,48 +684,56 @@ def rollout_with_stats(
         print("rollout: env={}, horizon={}, use_goals={}, num_episodes={}".format(
             env.name, horizon, use_goals, num_episodes,
         ))
-        rollout_logs = []
-        iterator = range(num_episodes)
-        if not verbose:
-            iterator = LogUtils.custom_tqdm(iterator, total=num_episodes)
+        
+        all_rollout_logs_mean = {}  
+        for rollout_type in ["dagger_", ""]:
+            query_expert = True if rollout_type == "dagger_" else False
+            rollout_logs = []
+            iterator = range(num_episodes)
+            if not verbose:
+                iterator = LogUtils.custom_tqdm(iterator, total=num_episodes)
+            
+            num_success = 0
+            for ep_i in iterator:
+                print(f"episode {ep_i+1} / {num_episodes}")
+                print("type", rollout_type)
 
-        num_success = 0
-        for ep_i in iterator:
-            print(f"episode {ep_i+1} / {num_episodes}")
-            rollout_timestamp = time.time()
-            rollout_info, rollout_suuccess, n_added_traj_unc = run_rollout(
-                policy=policy,
-                env=env,
-                horizon=horizon,
-                uncertainty_data_path=uncertainty_data_path,
-                render=render,
-                use_goals=use_goals,
-                video_writer=env_video_writer,
-                video_skip=video_skip,
-                terminate_on_success=terminate_on_success,
-                unc_model=unc_model,
-                unc_device=unc_device,
-                query_method=query_method,
-            )
-            total_unc_traj_added += n_added_traj_unc
-            if rollout_suuccess:
-                total_il_traj_added += 1
-            rollout_info["time"] = time.time() - rollout_timestamp
-            rollout_logs.append(rollout_info)
-            num_success += rollout_info["Success_Rate"]
-            if verbose:
-                print("Episode {}, horizon={}, num_success={}".format(ep_i + 1, horizon, num_success))
-                print(json.dumps(rollout_info, sort_keys=True, indent=4))
+                rollout_timestamp = time.time()
+                rollout_info, rollout_suuccess, n_added_traj_unc = run_rollout(
+                    policy=policy,
+                    env=env,
+                    horizon=horizon,
+                    uncertainty_data_path=uncertainty_data_path,
+                    render=render,
+                    use_goals=use_goals,
+                    video_writer=env_video_writer,
+                    video_skip=video_skip,
+                    terminate_on_success=terminate_on_success,
+                    unc_model=unc_model,
+                    unc_device=unc_device,
+                    query_method=query_method,
+                    query_expert=query_expert,
+                )
+                total_unc_traj_added += n_added_traj_unc
+                if rollout_suuccess:
+                    total_il_traj_added += 1
+                rollout_info["time"] = time.time() - rollout_timestamp
+                rollout_logs.append(rollout_info)
+                num_success += rollout_info[f"Success_Rate"]
+                if verbose:
+                    print("Episode {}, horizon={}, num_success={}".format(ep_i + 1, horizon, num_success))
+                    print(json.dumps(rollout_info, sort_keys=True, indent=4))
 
-        if video_dir is not None:
-            # close this env's video writer (next env has it's own)
-            env_video_writer.close()
+            if video_dir is not None:
+                # close this env's video writer (next env has it's own)
+                env_video_writer.close()
 
-        # average metric across all episodes
-        rollout_logs = dict((k, [rollout_logs[i][k] for i in range(len(rollout_logs))]) for k in rollout_logs[0])
-        rollout_logs_mean = dict((k, np.mean(v)) for k, v in rollout_logs.items())
-        rollout_logs_mean["Time_Episode"] = np.sum(rollout_logs["time"]) / 60. # total time taken for rollouts in minutes
-        all_rollout_logs[env_name] = rollout_logs_mean
+            # average metric across all episodes
+            rollout_logs = dict((k, [rollout_logs[i][k] for i in range(len(rollout_logs))]) for k in rollout_logs[0])
+            rollout_logs_mean = dict((f"{rollout_type}{k}", np.mean(v)) for k, v in rollout_logs.items())
+            rollout_logs_mean[f"{rollout_type}Time_Episode"] = np.sum(rollout_logs["time"]) / 60. # total time taken for rollouts in minutes
+            all_rollout_logs_mean.update(rollout_logs_mean)
+        all_rollout_logs[env_name] = all_rollout_logs_mean
 
     if video_path is not None:
         # close video writer that was used for all envs
@@ -1024,9 +1040,10 @@ def create_uncertainty_detector_dataset(srcfile_path, model_type):
 
     # copy over data universal to all uncertainty models
     data_grp = dstfile.create_group("data")
-    mask_grp = dstfile.create_group("mask")
     data_grp.attrs["env_args"] = srcfile["data"].attrs["env_args"]
     data_grp.attrs["total"] = srcfile["data"].attrs["total"]
+    
+    mask_grp = dstfile.create_group("mask")
     for skill_type, grps in srcfile["mask"].items():
         mask_grp.create_dataset(skill_type, data=grps)
 
@@ -1112,7 +1129,6 @@ def aggregate_uncertainty_detector_dataset(traj_data, skill_type, hdf5_file, mod
         del mask_grp[skill_type]
     new_data = old_data + [f"demo_{n_demos}"]
     mask_grp.create_dataset(skill_type, data=new_data)
-
 
 ################################ Uncertainty Detector Utils ################################
 
