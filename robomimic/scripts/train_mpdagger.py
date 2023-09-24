@@ -236,14 +236,14 @@ def prepare_for_training(config, log_dir, shape_meta, device):
         log_wandb=config.experiment.logging.log_wandb,
     )
 
-    # TODO - allow option for loading pretrained model
-    model = algo_factory(
-        algo_name=config.algo_name,
-        config=config,
-        obs_key_shapes=shape_meta["all_shapes"],
-        ac_dim=shape_meta["ac_dim"],
-        device=device,
-    )
+    # model = algo_factory(
+    #     algo_name=config.algo_name,
+    #     config=config,
+    #     obs_key_shapes=shape_meta["all_shapes"],
+    #     ac_dim=shape_meta["ac_dim"],
+    #     device=device,
+    # )
+    model = create_model_from_config(config, shape_meta, device)
 
     with open(os.path.join(log_dir, '..', 'config.json'), 'w') as outfile:
         json.dump(config, outfile, indent=4)
@@ -256,7 +256,21 @@ def prepare_for_training(config, log_dir, shape_meta, device):
     
     return data_logger, model, train_loader, valid_loader, obs_normalization_stats
 
-def train_mpdagger(il_config, unc_config, il_device, unc_device, il_model_ckpt=None, unc_model_ckpt=None):
+def create_model_from_config(config, shape_meta, device):
+    """
+    Creates model from config
+    """
+    model = algo_factory(
+        algo_name=config.algo_name,
+        config=config,
+        obs_key_shapes=shape_meta["all_shapes"],
+        ac_dim=shape_meta["ac_dim"],
+        device=device,
+    )
+
+    return model
+
+def train_mpdagger(il_config, unc_config, il_device, unc_device, il_model_ckpt=None, unc_model_ckpt=None, from_scratch_every_iter=False):
     # TODO - add option to load models from ckpt
     """
     Train a motion planner dagger with uncertainty estimation 
@@ -480,6 +494,11 @@ def train_mpdagger(il_config, unc_config, il_device, unc_device, il_model_ckpt=N
                     TrainUtils.initialize_dataloaders(config=unc_config, shape_meta=unc_shape_meta)
 
             should_train_unc = n_added_unc_traj > 0
+
+            # Create new model if training models from scratch in the next loop
+            if from_scratch_every_iter:
+                il_model = create_model_from_config(il_config, il_shape_meta, il_device)
+                unc_model = create_model_from_config(unc_config, unc_shape_meta, unc_device)
     
         done_training = (il_epochs_so_far >= il_config.train.num_epochs)\
             and (unc_epochs_so_far >= unc_config.train.num_epochs)
