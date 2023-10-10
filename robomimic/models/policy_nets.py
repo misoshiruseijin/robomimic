@@ -1273,9 +1273,9 @@ class TransformerGMMActorNetwork(TransformerActorNetwork):
             # repeat the goal observation in time to match dimension with obs_dict
             mod = list(obs_dict.keys())[0]
             goal_dict = TensorUtils.unsqueeze_expand_at(goal_dict, size=obs_dict[mod].shape[1], dim=1)
-
+        
+        obs_dict = TensorUtils.to_sequence(obs_dict)
         forward_kwargs = dict(obs=obs_dict, goal=goal_dict)
-
         outputs = MIMO_Transformer.forward(self, **forward_kwargs)
         
         means = outputs["mean"]
