@@ -312,6 +312,7 @@ def train_mpdagger(il_config, unc_config, il_device, unc_device, il_model_ckpt=N
         raise Exception("Dataset at provided path {} not found!".format(dataset_path))
     
     # Since training aggregates the datafile, make a copy of dataset and aggreate on the copy to avoid overwriting the original file
+    # print("WARINING: LINE TO MAKE DATASET COPY IS COMMENTED OUT!")
     print("Making a copy of the dataset. This may take a while...")
     original_dataset_path = dataset_path
     student_aggr_dataset_path = dataset_path.split(".")[0] + "_aggr.hdf5"
@@ -414,12 +415,12 @@ def train_mpdagger(il_config, unc_config, il_device, unc_device, il_model_ckpt=N
 
     done_training = (il_epochs_so_far >= il_config.train.num_epochs) and (unc_epochs_so_far >= unc_config.train.num_epochs)
     phases = ["unc", "il"]
-    training_phase = 1 # start with training uncertainty estimation model
-    should_train_unc = True
+    training_phase = 0 # start with training uncertainty estimation model
+    # should_train_unc = True
 
     while not done_training:
         phase = phases[training_phase]
-        if phase == "unc" and should_train_unc:
+        if phase == "unc": # and should_train_unc:
             print("TRAINING UNCERTAINTY MODEL")
             # train the uncertainty estimation model
             unc_best_valid_loss, unc_last_ckpt_time, unc_epochs_so_far = train_loop(
@@ -493,7 +494,7 @@ def train_mpdagger(il_config, unc_config, il_device, unc_device, il_model_ckpt=N
                 unc_train_loader, unc_valid_loader, unc_obs_normalization_stats = \
                     TrainUtils.initialize_dataloaders(config=unc_config, shape_meta=unc_shape_meta)
                 
-            should_train_unc = n_added_unc_traj > 0
+            # should_train_unc = n_added_unc_traj > 0
 
             # Create new model if training models from scratch in the next loop
             if from_scratch_every_iter:
@@ -562,6 +563,7 @@ def main(args):
     # print(res_str)
 
     # TODO - overwrite dataset path in config with args.dataset
+    print("root directory", os.getcwd())
     ext_il_cfg = json.load(open(args.il_config, 'r'))
     ext_unc_cfg = json.load(open(args.unc_config, 'r'))
 
@@ -586,7 +588,11 @@ def main(args):
     il_device = TorchUtils.get_torch_device(try_to_use_cuda=il_config.train.cuda)
     unc_device = TorchUtils.get_torch_device(try_to_use_cuda=unc_config.train.cuda)
 
-    train_mpdagger(il_config, unc_config, il_device, unc_device)
+    train_mpdagger(
+        il_config=il_config, unc_config=unc_config,
+        il_device=il_device, unc_device=unc_device,
+        from_scratch_every_iter=args.scratch,
+    )
 
 
 if __name__ == "__main__":
@@ -596,7 +602,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--il-config",
         type=str,
-        default="/home/zharu-local/distilling-moma/distilling_moma/experiment_configs/test_dagger.json",
+        default="/distilling-moma/distilling_moma/experiment_configs/test_dagger_debug.json",
         help="path to a config json that will be used to override the default settings",
     )
 
@@ -604,7 +610,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--unc-config",
         type=str,
-        default="/home/zharu-local/distilling-moma/distilling_moma/experiment_configs/test_vae.json",
+        default="/distilling-moma/distilling_moma/experiment_configs/test_vae_debug.json",
         help="path to a config json that will be used to override the default settings",
     )
 
@@ -612,7 +618,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--dataset",
         type=str,
-        default="/home/zharu-local/distilling-moma/data/dummy_ik.hdf5",
+        default="/viscam/u/ayanoh/distilling-moma/data/demo_100_traj_camera_v2.hdf5",
         help="(optional) if provided, override the dataset path defined in the config",
     )
 
@@ -621,6 +627,12 @@ if __name__ == "__main__":
         "--debug",
         action='store_true',
         help="set this flag to run a quick training run for debugging purposes"
+    )
+
+    parser.add_argument(
+        "--scratch",
+        action='store_true',
+        help="set this flag to retrain a model from scratch every time data aggregation happens"
     )
 
     args = parser.parse_args()

@@ -259,8 +259,9 @@ def run_rollout_without_active_query(
             # NOTE: this ignores rollout horizon and executes expert actions until success or failure
             if is_expert_in_control:
 
-                # TODO - below is a placeholder. Implement a function that returns the correct generator 
-                ac_generator = env.controller.grasp(env.objects["grasp_obj"], track_obj=True) 
+                # Get the expert action generator from environment
+                ac_generator, skill_name = env.env.get_expert_action()
+                # ac_generator = env.controller.grasp(env.objects["grasp_obj"], track_obj=True) # this is a placeholder
 
                 # TODO - replace below block with skill_wrapper's execute_skill function
                 for ac, skill_name in ac_generator:
@@ -438,16 +439,8 @@ def run_rollout(
     
     Returns:
         results (dict): dictionary containing return, success rate, etc.
-
-        expert_succeeded (bool): True if rollout was successful (i.e. expert was in control and finished the task successfully)        
+        skill_succeeded (bool): True if rollout was successful (i.e. expert was in control and finished the task successfully)        
     """
-    
-    def get_skill(): # TODO implement this in each environment
-        # dummy function that return skill action generator and skill name
-        ac_generator = env.env.controller._grasp(env.env.objects["grasp_obj"]) #, track_obj=True) 
-        skill_name = "pick"
-        return ac_generator, skill_name
-
     assert isinstance(policy, RolloutPolicy)
     assert isinstance(env, EnvBase) or isinstance(env, EnvWrapper)
 
@@ -466,15 +459,22 @@ def run_rollout(
     success = { k: False for k in env.is_success() } # success metrics
 
     is_expert_in_control = False
-    expert_succeeded = False
+    skill_succeeded = False
 
     student_traj = []
     
     n_addded_traj_il = 0
     n_added_traj_unc = 0
 
+    rollout_done = False
+
     try:
         for step_i in range(horizon):
+
+            # terminate this rollout if expert failed to succeed
+            if rollout_done:
+                print("Expert failed. Terminating rollout.")
+                break
 
             # NOTE : for now, once expert takes control, the expert finishes this episode without handing control back to student
             # TODO - should be more general (this is only for vae)
@@ -492,18 +492,29 @@ def run_rollout(
             ######## Case: Expert is in Control ########
             # NOTE: this ignores rollout horizon and executes expert actions until success or failure
             if is_expert_in_control:
+                total_steps = step_i
+                skill_succeeded = True
+                while True:
+                    # Get the expert action generator from environment
+                    ac_generator, skill_name = env.env.get_expert_action()
+                    print(f"skill {skill_name} called")
+                    if skill_name == "none":
+                        print("Got no skill name. Ending expert demo.")
+                        break
 
-                ac_generator, skill_name = get_skill() # TODO - this is a dummy function. Implement function in environment that return correct skill action generator
-                expert_results, expert_succeeded = env.execute_skill(ac_generator, skill_name, video_writer, video_skip=video_skip)
+                    expert_results, skill_succeeded = env.execute_skill(ac_generator, skill_name, video_writer, video_skip=video_skip)
 
-                # update results (student + expert)
-                total_steps = step_i + expert_results["Horizon"]
-                total_reward += expert_results["Return"]
-                success["task"] = expert_succeeded
+                    if skill_succeeded:
+                        # update results (student + expert)
+                        total_steps += expert_results["Horizon"]
+                        total_reward += expert_results["Return"]
+                        # success["task"] = skill_succeeded
 
-                # once the expert demonstration finish, end this rollout
+                    else:
+                        print("Skill execution failed. Ending expert demo.")
+                        break
                 break
-                    
+
             ######## Case: Student is in Control ########
             else:
                 # process observations (observations used in rollout must be processed)
@@ -555,8 +566,9 @@ def run_rollout(
                     break
 
         print(f"============== finished one rollout ({total_steps} steps) ==============")
-        # breakpoint()
         # if task succeeded, aggregate datasets
+        success["task"] = env.is_success()["task"]
+        print("Task Success:", env.is_success()["task"])
         if success["task"] and query_expert: # don't aggregate dataset if this is an evaluation rollout
             # uncertainty dataset
             skill_type, expert_traj = env.get_current_traj_history()[0]
@@ -587,7 +599,7 @@ def run_rollout(
         if k != "task":
             results["{}_Success_Rate".format(k)] = float(success[k])
 
-    return results, expert_succeeded, n_added_traj_unc
+    return results, skill_succeeded, n_added_traj_unc
 
 def rollout_with_stats(
         policy,
@@ -884,7 +896,8 @@ def run_epoch(model, data_loader, epoch, validate=False, num_steps=None, obs_nor
     start_time = time.time()
 
     data_loader_iter = iter(data_loader)
-    for _ in LogUtils.custom_tqdm(range(num_steps)):
+    # for _ in LogUtils.custom_tqdm(range(num_steps)):
+    for _ in range(num_steps):
 
         # load next batch from data loader
         try:
