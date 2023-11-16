@@ -31,10 +31,14 @@ MODEL_TYPE_TO_DATAFILE_CONTENT = {
     "vae" : {
         "obs" : ["rgb"],
         "non_obs" : ["actions"],
+    },
+    "cvae" : {
+        "obs" : ["rgb"],
+        "non_obs" : ["actions"]
     }
 }
 
-QUERY_METHODS = ["vae"]
+QUERY_METHODS = ["vae", "cvae"]
 
 ################################ Training Utils ################################
 
@@ -479,13 +483,14 @@ def run_rollout(
             # NOTE : for now, once expert takes control, the expert finishes this episode without handing control back to student
             # TODO - should be more general (this is only for vae)
             if query_expert:
-                query = should_query_expert(
-                    unc_model=unc_model, query_method=query_method, unc_device=unc_device,
-                    processed_ob_dict=env.process_obs(ob_dict, postprocess_for_eval=True)
-                )
-                if not is_expert_in_control and query: 
-                    print("Expert queried at step", step_i)
-                    is_expert_in_control = True
+                if not is_expert_in_control:
+                    query = should_query_expert(
+                        unc_model=unc_model, query_method=query_method, unc_device=unc_device,
+                        processed_ob_dict=env.process_obs(ob_dict, postprocess_for_eval=True)
+                    )
+                    if query: 
+                        print("Expert queried at step", step_i)
+                        is_expert_in_control = True
             else:
                 query = False
 

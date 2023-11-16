@@ -236,13 +236,6 @@ def prepare_for_training(config, log_dir, shape_meta, device):
         log_wandb=config.experiment.logging.log_wandb,
     )
 
-    # model = algo_factory(
-    #     algo_name=config.algo_name,
-    #     config=config,
-    #     obs_key_shapes=shape_meta["all_shapes"],
-    #     ac_dim=shape_meta["ac_dim"],
-    #     device=device,
-    # )
     model = create_model_from_config(config, shape_meta, device)
 
     with open(os.path.join(log_dir, '..', 'config.json'), 'w') as outfile:
@@ -610,7 +603,8 @@ if __name__ == "__main__":
     parser.add_argument(
         "--unc-config",
         type=str,
-        default="/distilling-moma/distilling_moma/experiment_configs/test_vae_debug.json",
+        # default="/distilling-moma/distilling_moma/experiment_configs/test_vae_debug.json",
+        default="/distilling-moma/distilling_moma/experiment_configs/test_cvae_debug.json",
         help="path to a config json that will be used to override the default settings",
     )
 
