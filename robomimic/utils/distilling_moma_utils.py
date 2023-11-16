@@ -1162,7 +1162,7 @@ def should_query_expert(query_method, unc_model=None, processed_ob_dict=None, un
             },
         }
         recons_loss = unc_model.get_reconstruction_loss(model_input)
-        thresh = 0.02 # TODO - make this a hyperparameter
+        thresh = 0.035 # TODO - make this a hyperparameter
         print("VAE reconstruction loss: ", recons_loss)
         return recons_loss > thresh
 
