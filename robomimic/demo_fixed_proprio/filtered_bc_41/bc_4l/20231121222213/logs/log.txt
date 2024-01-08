@@ -1,0 +1,38 @@
+
+============= Initialized Observation Utils with Obs Spec =============
+
+using obs modality: low_dim with keys: ['proprio']
+using obs modality: rgb with keys: []
+using obs modality: depth with keys: []
+using obs modality: scan with keys: []
+
+============= Loaded Environment Metadata =============
+obs key proprio with shape (65,)
+
+Traceback (most recent call last):
+  File "train.py", line 71, in <module>
+    main(args)
+  File "train.py", line 36, in main
+    train(config, device=device)
+  File "/home/svl/robomimic/robomimic/scripts/train.py", line 124, in train
+    device=device,
+  File "/home/svl/robomimic/robomimic/algo/algo.py", line 79, in algo_factory
+    **algo_kwargs
+  File "/home/svl/robomimic/robomimic/algo/algo.py", line 126, in __init__
+    self._create_networks()
+  File "/home/svl/robomimic/robomimic/algo/bc.py", line 95, in _create_networks
+    self.nets = self.nets.float().to(self.device)
+  File "/home/svl/mambaforge/envs/omnigibson/lib/python3.7/site-packages/torch/nn/modules/module.py", line 987, in to
+    return self._apply(convert)
+  File "/home/svl/mambaforge/envs/omnigibson/lib/python3.7/site-packages/torch/nn/modules/module.py", line 639, in _apply
+    module._apply(fn)
+  File "/home/svl/mambaforge/envs/omnigibson/lib/python3.7/site-packages/torch/nn/modules/module.py", line 639, in _apply
+    module._apply(fn)
+  File "/home/svl/mambaforge/envs/omnigibson/lib/python3.7/site-packages/torch/nn/modules/module.py", line 639, in _apply
+    module._apply(fn)
+  [Previous line repeated 2 more times]
+  File "/home/svl/mambaforge/envs/omnigibson/lib/python3.7/site-packages/torch/nn/modules/module.py", line 662, in _apply
+    param_applied = fn(param)
+  File "/home/svl/mambaforge/envs/omnigibson/lib/python3.7/site-packages/torch/nn/modules/module.py", line 985, in convert
+    return t.to(device, dtype if t.is_floating_point() or t.is_complex() else None, non_blocking)
+KeyboardInterrupt
